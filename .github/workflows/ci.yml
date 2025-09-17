@@ -1,0 +1,138 @@
+
+name: CI
+
+on:
+  push:
+    branches:
+      - version-15
+  pull_request:
+
+concurrency:
+  group: develop-woocommerce_fusion-${{ github.event.number }}
+  cancel-in-progress: true
+
+env:
+  TEST_AGAINST_FRAPPE_VERSION: v15.70.0
+  TEST_AGAINST_ERPNEXT_VERSION: v15.57.5
+
+jobs:
+  tests:
+    runs-on: ubuntu-22.04 
+    strategy:
+      fail-fast: false
+    name: Backend Unit Tests & UI Tests
+
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=5s --health-timeout=2s --health-retries=3
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: |
+              3.10
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 22
+          check-latest: true
+
+      - name: Cache pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/*requirements.txt', '**/pyproject.toml', '**/setup.py', '**/setup.cfg') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+            ${{ runner.os }}-
+
+      - name: Get yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "dir=$(yarn cache dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache yarn
+        uses: actions/cache@v3
+        id: yarn-cache
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+
+      - name: Install Caddy and WP-Playground
+        run: |
+          # Install Caddy
+          sudo apt update
+          sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+          sudo apt update
+          sudo apt install -y caddy
+          
+          # Install WP-Playground CLI
+          npm install --global @wp-playground/cli
+
+      - name: Install Frappe Bench
+        run: |
+          bash ${GITHUB_WORKSPACE}/.github/helper/install.sh
+
+      - name: Start WordPress Playground and Caddy
+        working-directory: /home/runner/frappe-bench/apps/woocommerce_fusion
+        run: |
+          echo "--- Starting Caddy with sudo ---"
+          # Use the existing, modified wp_woo_caddy file and run it with root privileges for port 443.
+          sudo caddy run --config wp_woo_caddy --adapter caddyfile > caddy.log 2>&1 &
+          
+          echo "--- Starting WordPress Playground on port 9400 ---"
+          # Start Playground and explicitly set the port to match the Caddy reverse_proxy.
+          npx @wp-playground/cli server --blueprint wp_woo_blueprint.json --port=9400 --site-url=https://woo-test.localhost > playground.log 2>&1 &
+          
+          echo "--- Waiting for servers to become available (up to 240s) ---"
+          # Wait for the server to respond, and dump logs if it fails.
+          timeout 240s bash -c 'until curl -k --output /dev/null --silent --head --fail https://woo-test.localhost; do printf "."; sleep 2; done' || {
+            echo "\n\n--- Timeout reached! Server did not start. Displaying logs for debugging: ---"
+            echo "\n--- Caddy Logs (caddy.log) ---"
+            sudo cat caddy.log
+            echo "\n--- WordPress Playground Logs (playground.log) ---"
+            cat playground.log
+            exit 1
+          }
+          
+          echo "\nServers are up and running!"
+
+      - name: Run Tests
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site set-config allow_tests true
+          bench --site test_site run-tests --app woocommerce_fusion --coverage
+        env:
+          TYPE: server
+          DEV_SERVER: 1
+          WOO_INTEGRATION_TESTS_WEBSERVER: "https://woo-test.localhost"
+          WOO_API_CONSUMER_KEY: "ck_test_123456789"
+          WOO_API_CONSUMER_SECRET: "cs_test_abcdefg"
+
+      - name: Stop WordPress Playground and Caddy
+        if: always()
+        run: |
+          echo "Cleaning up background processes..."
+          sudo pkill -f caddy
+          sudo pkill -f 'php -S'
+
+      - name: Upload coverage data
+        uses: codecov/codecov-action@v3
+        with:
+          name: Backend
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: /home/runner/frappe-bench/sites/coverage.xml
+          verbose: true
