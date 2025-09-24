@@ -262,6 +262,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
 		"""
 		Update the ERPNext Item with fields from it's corresponding WooCommerce Product
 		"""
+		return # Added this line bcs Woo to ERP not requred. only one side
 		item_dirty = False
 		if item.item.item_name != woocommerce_product.woocommerce_name:
 			item.item.item_name = woocommerce_product.woocommerce_name
@@ -345,16 +346,20 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
 		if wc_product_dirty:
 			wc_product.save()
-		self.push_wc_product(72912, sku="NEW-SKU-999")
+		self.push_wc_product(72978, sku="SNEKERS-SKU-999")
 		self.push_wc_product(
-			72912,
+			72978,
+			images=[{"src": "https://images.pexels.com/photos/1598505/pexels-photo-1598505.jpeg"}]
+		)
+		self.push_wc_product(
+			72978,
 			regular_price="330.00",
 			description="<div><p>Updated desc</p></div>",
 			stock_status="instock",
 			manage_stock=False,
 		)
 		self.push_wc_product(
-			72912,
+			72978,
 			meta={
 				"branch_stock_0_branch": "jeddah-branch",
 				"branch_stock_0_stock_qty": 33.33,
@@ -444,6 +449,8 @@ class SynchroniseItem(SynchroniseWooCommerce):
 		"""
 		Create an ERPNext Item from the given WooCommerce Product
 		"""
+		return # added bcs no need to sync from woo-to-erp
+  
 		wc_server = frappe.get_cached_doc("WooCommerce Server", wc_product.woocommerce_server)
 
 		# Create Item
