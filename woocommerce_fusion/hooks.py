@@ -27,7 +27,10 @@ app_license = "GNU GPLv3"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-doctype_js = {"Sales Order": "public/js/selling/sales_order.js", "Item": "public/js/stock/item.js"}
+doctype_js = {"Sales Order": "public/js/selling/sales_order.js", 
+              "Item": "public/js/stock/item.js",
+              "Woocommerce Customer": "woocommerce/doctype/woocommerce_customer/woocommerce_customer.js"
+            }
 doctype_list_js = {"Sales Order": "public/js/selling/sales_order_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -108,32 +111,32 @@ override_doctype_class = {
 # 	}
 # }
 doc_events = {
-	"Stock Entry": {
-		"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-		"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	},
-	"Stock Reconciliation": {
-		"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-		"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	},
-	"Sales Invoice": {
-		"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-		"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	},
-	"Delivery Note": {
-		"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-		"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	},
-	"Item Price": {
-		"on_update": "woocommerce_fusion.tasks.sync_item_prices.update_item_price_for_woocommerce_item_from_hook"
-	},
-	"Sales Order": {
-		"on_submit": "woocommerce_fusion.tasks.sync_sales_orders.run_sales_order_sync_from_hook"
-	},
-	"Item": {
-		"on_update": "woocommerce_fusion.tasks.sync_items.run_item_sync_from_hook",
-		"after_insert": "woocommerce_fusion.tasks.sync_items.run_item_sync_from_hook",
-	},
+	# "Stock Entry": {
+	# 	"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
+	# 	"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
+	# },
+	# "Stock Reconciliation": {
+	# 	"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
+	# 	"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
+	# },
+	# "Sales Invoice": {
+	# 	"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
+	# 	"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
+	# },
+	# "Delivery Note": {
+	# 	"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
+	# 	"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
+	# },
+	# "Item Price": {
+	# 	"on_update": "woocommerce_fusion.tasks.sync_item_prices.update_item_price_for_woocommerce_item_from_hook"
+	# },
+	# "Sales Order": {
+	# 	"on_submit": "woocommerce_fusion.tasks.sync_sales_orders.run_sales_order_sync_from_hook"
+	# },
+	# "Item": {
+	# 	"on_update": "woocommerce_fusion.tasks.sync_items.run_item_sync_from_hook",
+	# 	"after_insert": "woocommerce_fusion.tasks.sync_items.run_item_sync_from_hook",
+	# },
 }
 
 # Scheduled Tasks
@@ -146,14 +149,14 @@ scheduler_events = {
 	# 	"weekly": [
 	# 		"woocommerce_fusion.tasks.daily"
 	# 	],
-	"hourly_long": [
-		"woocommerce_fusion.tasks.sync_sales_orders.sync_woocommerce_orders_modified_since",
-		"woocommerce_fusion.tasks.sync_items.sync_woocommerce_products_modified_since",
-	],
-	"daily_long": [
-		"woocommerce_fusion.tasks.stock_update.update_stock_levels_for_all_enabled_items_in_background",
-		"woocommerce_fusion.tasks.sync_item_prices.run_item_price_sync_in_background",
-	],
+	# "hourly_long": [
+	# 	"woocommerce_fusion.tasks.sync_sales_orders.sync_woocommerce_orders_modified_since",
+	# 	"woocommerce_fusion.tasks.sync_items.sync_woocommerce_products_modified_since",
+	# ],
+	# "daily_long": [
+	# 	"woocommerce_fusion.tasks.stock_update.update_stock_levels_for_all_enabled_items_in_background",
+	# 	"woocommerce_fusion.tasks.sync_item_prices.run_item_price_sync_in_background",
+	# ],
 	# 	"monthly": [
 	# 		"woocommerce_fusion.tasks.monthly"
 	# 	],
@@ -162,7 +165,7 @@ scheduler_events = {
 # Testing
 # -------
 
-before_tests = "woocommerce_fusion.setup.utils.before_tests"
+# before_tests = "woocommerce_fusion.setup.utils.before_tests"
 
 # Overriding Methods
 # ------------------------------
@@ -262,3 +265,7 @@ fixtures = [
 default_log_clearing_doctypes = {
 	"WooCommerce Request Log": 7,
 }
+
+
+# Virtual Doctypes
+virtual_doctypes = ["Woocommerce Customer", "WooCommerce Order"]
