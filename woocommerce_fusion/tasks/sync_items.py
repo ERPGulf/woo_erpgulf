@@ -617,10 +617,10 @@ class SynchroniseItem(SynchroniseWooCommerce):
             if translated_name =="Compatible":
                 raw_options = attr.values or ""
                 # clean_opt = opt.strip()
-                frappe.log_error("raw_options",raw_options)
+                # frappe.log_error("raw_options",raw_options)
                 if raw_options:
                     translated_opt = self.translate_text(raw_options)
-                    frappe.log_error("translated_opt",translated_opt)
+                    # frappe.log_error("translated_opt",translated_opt)
                     options.append(translated_opt)
             else:
                 raw_options = (attr.values or "").split(",")
@@ -972,11 +972,12 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
             brand = self.translate_text(row.brand or "")
             model = self.translate_text(row.model or "")
+            fuel = self.translate_text(row.fuel or "")
 
             meta_data[f"add_compactable_details_{index}_brand"] = brand
             meta_data[f"add_compactable_details_{index}_model"] = model
             meta_data[f"add_compactable_details_{index}_years"] = expanded_years
-            meta_data[f"add_compactable_details_{index}_variant"] = row.fuel or ""
+            meta_data[f"add_compactable_details_{index}_variant"] = fuel
             meta_data[f"add_compactable_details_{index}_engine_size"] = row.engine_size or ""
 
         return meta_data, len(compatibility_entries)
@@ -1108,7 +1109,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         # Assign core fields
         raw_name = item.item.item_name
         clean_name = self.clean_product_name(raw_name)
-        frappe.log_error("clean_name",clean_name )
+        # frappe.log_error("clean_name",clean_name )
         if wc_product.woocommerce_name != clean_name:
             wc_product.woocommerce_name = clean_name
         # wc_product.woocommerce_name = item.item.item_name
