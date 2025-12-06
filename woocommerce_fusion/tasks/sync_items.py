@@ -359,12 +359,29 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
     def push_wc_product(self, product_id: int, meta=None, **fields) -> dict:
         import requests
-        WC_API_URL = "https://demo.mrkbatx.com/wp-json/wc/v3/products"
-        # WC_CONSUMER_KEY = "ck_32c5c696b274678b79d19ac89ba7099ff3f6d98e"
-        # WC_CONSUMER_SECRET = "cs_d74b4b417aa12b728980c695f4315f09c48ccbaa"
-        WC_CONSUMER_KEY = "ck_17fa4858255a940690410189824285a09db3ebab"
-        WC_CONSUMER_SECRET = "cs_ae71b0ceab553b3be4798a6708c410e0636073e2"
-
+        # WC_API_URL = "https://demo.mrkbatx.com/wp-json/wc/v3/products"
+        
+        # WC_CONSUMER_KEY = "ck_17fa4858255a940690410189824285a09db3ebab"
+        # WC_CONSUMER_SECRET = "cs_ae71b0ceab553b3be4798a6708c410e0636073e2"
+        
+        servers = frappe.get_all(
+            "WooCommerce Server",
+            fields=["woocommerce_server_url", "api_consumer_key", "api_consumer_secret", "enable_sync"],
+            filters={"enable_sync": 1},
+            limit=1
+        )
+        # self.wcapi = API(url=server.get("woocommerce_server_url").rstrip('/'),consumer_key=server.get("api_consumer_key"),consumer_secret=server.get("api_consumer_secret"),version="wc/v3")
+        if servers and len(servers) > 0:
+            server = servers[0] if isinstance(servers[0], dict) else servers[0].as_dict()       
+            WC_CONSUMER_KEY = server.get("api_consumer_key")
+            WC_CONSUMER_SECRET = server.get("api_consumer_secret")
+            # frappe.log_error("ck",WC_CONSUMER_KEY)
+            # frappe.log_error("cs",WC_CONSUMER_SECRET)
+            wc_base_url = server.get("woocommerce_server_url", "").rstrip("/")
+            WC_API_URL = f"{wc_base_url}/wp-json/wc/v3/products"
+            # frappe.log_error("WC_API_URL",WC_API_URL)
+            
+        
         url = f"{WC_API_URL}/{product_id}"
         # frappe.log_error("url",url)
         payload = {}
@@ -733,6 +750,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             meta={
                 "mark_spare_part": "1" if is_spare_part else "0"
             }
+
         )
         
         # ✅ Build compatibility data dynamically from ERPNext child table
@@ -1003,7 +1021,19 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 return value.strip('-').lower()
 
             search_slug = slugify(name)
-            url = f"https://demo.mrkbatx.com/wp-json/wp/v2/offer_category?search={search_slug}"
+            servers = frappe.get_all(
+                "WooCommerce Server",
+                fields=["woocommerce_server_url", "api_consumer_key", "api_consumer_secret", "enable_sync"],
+                filters={"enable_sync": 1},
+                limit=1
+            )
+            if servers and len(servers) > 0:
+                server = servers[0] if isinstance(servers[0], dict) else servers[0].as_dict()  
+                wc_base_url = server.get("woocommerce_server_url", "").rstrip("/")
+                
+            # url = f"https://demo.mrkbatx.com/wp-json/wp/v2/offer_category?search={search_slug}"
+            url = f"{wc_base_url}/wp-json/wp/v2/offer_category?search={search_slug}"
+            # frappe.log_error("url for create category",url)
             response = requests.get(url, auth=(self.consumer_key, self.consumer_secret))
 
             existing = response.json()
