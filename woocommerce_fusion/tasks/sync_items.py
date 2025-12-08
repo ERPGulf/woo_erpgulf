@@ -313,22 +313,22 @@ class SynchroniseItem(SynchroniseWooCommerce):
             frappe.log_error("264")
             self.update_woocommerce_product(self.woocommerce_product, self.item)
 
-            if (
-                10==10
-                # self.woocommerce_product.woocommerce_date_modified
-                # != self.item.item_woocommerce_server.woocommerce_last_sync_hash
-            ):
-                # frappe.log_error("269")
-                # if get_datetime(self.woocommerce_product.woocommerce_date_modified) > get_datetime(
-                # 	self.item.item.modified
-                # ):
-                # 	frappe.log_error("273")
-                # 	self.update_item(self.woocommerce_product, self.item)
-                if get_datetime(self.woocommerce_product.woocommerce_date_modified) < get_datetime(
-                    self.item.item.modified
-                ):
-                    frappe.log_error("276")
-                    self.update_woocommerce_product(self.woocommerce_product, self.item)
+            # if (
+            #     10==10
+            #     # self.woocommerce_product.woocommerce_date_modified
+            #     # != self.item.item_woocommerce_server.woocommerce_last_sync_hash
+            # ):
+            #     # frappe.log_error("269")
+            #     # if get_datetime(self.woocommerce_product.woocommerce_date_modified) > get_datetime(
+            #     # 	self.item.item.modified
+            #     # ):
+            #     # 	frappe.log_error("273")
+            #     # 	self.update_item(self.woocommerce_product, self.item)
+            #     if get_datetime(self.woocommerce_product.woocommerce_date_modified) < get_datetime(
+            #         self.item.item.modified
+            #     ):
+            #         frappe.log_error("276")
+            #         self.update_woocommerce_product(self.woocommerce_product, self.item)
 
     def update_item(self, woocommerce_product: WooCommerceProduct, item: ERPNextItemToSync):
         """
@@ -568,6 +568,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         # frappe.log_error("clean_name2",clean_name )
         product_id = getattr(wc_product, "id", None) or wc_product.get("id") or wc_product.get("product_id")
         self.push_wc_product(product_id, sku=item.item.item_code)
+        frappe.log_error("item code",item.item.item_code)
 
         # push images
         image_urls = str(item.item.custom_woo_image_url or "").strip()
@@ -1491,40 +1492,78 @@ def expand_years(text: str):
     return results
 
 
+# @frappe.whitelist()
+# def bulk_run_item_sync(items):
+#     """
+#     Trigger WooCommerce sync for multiple selected items.
+#     """
+#     if isinstance(items, str):
+#         import json
+#         items = json.loads(items)
+
+#     success, failed = [], []
+#     total_items = len(items)
+#     frappe.log_error("trotal no of items in sync",total_items)
+#     for idx, item_code in enumerate(items, start=1):
+#         try:
+#             frappe.log_error(f"🔄 Syncing item {idx} of {total_items}: {item_code}")
+#             # run_item_sync(item_code=item_code, enqueue=False)
+#             run_item_sync(item_code=item_code, enqueue=True)
+#             frappe.log_error("True")
+#             success.append(item_code)
+#         except Exception as e:
+#             frappe.log_error(f"Bulk sync failed for {item_code}", frappe.get_traceback())
+#             failed.append(f"{item_code}: {str(e)}")
+
+#     message = ""
+#     if success:
+#         message += f"✅ Successfully synced: {', '.join(success)}<br>"
+#     if failed:
+#         message += f"❌ Failed to sync: {', '.join(failed)}"
+#     return message
+
+
 @frappe.whitelist()
 def bulk_run_item_sync(items):
-    """
-    Trigger WooCommerce sync for multiple selected items.
-    """
     if isinstance(items, str):
         import json
         items = json.loads(items)
 
-    success, failed = [], []  # ✅ fixed
     total_items = len(items)
-    frappe.log_error("trotal no of items in sync",total_items)
+    user = frappe.session.user
+
+    frappe.enqueue(
+        "woocommerce_fusion.tasks.sync_items.background_bulk_sync",
+        items=items,
+        total_items=total_items,
+        user=user,
+        queue="long",
+        job_name="bulk_wc_sync"
+        
+    )
+
+    return f"🕒 Sync started for {total_items} item(s) in background."
+def background_bulk_sync(items, total_items,user):
+    success, failed = [], []
+
     for idx, item_code in enumerate(items, start=1):
         try:
-            frappe.log_error(f"🔄 Syncing item {idx} of {total_items}: {item_code}")
             run_item_sync(item_code=item_code, enqueue=False)
             success.append(item_code)
-        except Exception as e:
-            frappe.log_error(f"Bulk sync failed for {item_code}", frappe.get_traceback())
-            failed.append(f"{item_code}: {str(e)}")
-    # for item_code in items:
-    #     try:
-    #         # Run sync immediately — change to enqueue=True if you want async
-    #         run_item_sync(item_code=item_code, enqueue=False)
-    #         success.append(item_code)
-    #     except Exception as e:
-    #         frappe.log_error(f"Bulk sync failed for {item_code}", frappe.get_traceback())
-    #         failed.append(f"{item_code}: {str(e)}")
+        except Exception:
+            failed.append(item_code)
 
-    message = ""
-    if success:
-        message += f"✅ Successfully synced: {', '.join(success)}<br>"
-    if failed:
-        message += f"❌ Failed to sync: {', '.join(failed)}"
-    # frappe.log_error(message, "Bulk sync completed")
-    # frappe.msgprint(message, indicator="green" if not failed else "red", alert=True)
-    return message
+    message = f"""
+    WooCommerce Sync Completed<br><br>
+    ✅ Success: {len(success)} items<br>
+    ❌ Failed: {len(failed)} items<br><br>
+    """
+
+    frappe.log_error("WC Bulk Sync Summary", message)
+
+    # Optional: send user notification
+    frappe.publish_realtime(
+        event="wc_bulk_sync_complete",
+        message=message,
+        user=user 
+    )
