@@ -470,6 +470,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             raw_name = item.item.item_name
             clean_name = self.clean_product_name(raw_name)
             frappe.log_error("clean_name",clean_name )
+            
             wc_product = frappe.get_doc({
                 "doctype": "WooCommerce Product",
                 "type": "woosb",
@@ -479,6 +480,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 # "woocommerce_id": wc_product_id,
                 "regular_price": item.item.standard_rate or 0,
                 "status": "publish",
+                # "sku": item.item.item_code,
                 "meta_data": json.dumps([
                     {"key": "adv_badge", "value": "combo"},
                     {"key": "woosb_ids", "value": woosb_ids}
@@ -880,19 +882,40 @@ class SynchroniseItem(SynchroniseWooCommerce):
     import re
     def contains_arabic(self,text):
         return bool(re.search(r'[\u0600-\u06FF]', text))
-    def extract_english(self,text):
+
+    def extract_english(self, text):
         eng = re.findall(r"[A-Za-z0-9\-\/\(\)\[\]\'\"\.\,\&\+\s]+", text)
         eng_clean = " ".join(eng).strip()
+        if re.fullmatch(r"[-\/\(\)\[\]\'\"\.\,\&\+\s]*", eng_clean):
+            return ""
+
         return eng_clean
-    def clean_product_name(self,name):
+    def clean_product_name(self, name):
         name = name.strip()
         english_part = self.extract_english(name)
         has_arabic = self.contains_arabic(name)
+        if has_arabic and not english_part:
+            return name
         if english_part and has_arabic:
             return english_part
-        if english_part and not has_arabic:
+        if english_part:
             return english_part
         return name
+    
+    # def extract_english(self,text):
+    #     eng = re.findall(r"[A-Za-z0-9\-\/\(\)\[\]\'\"\.\,\&\+\s]+", text)
+    #     eng_clean = " ".join(eng).strip()
+    #     return eng_clean
+
+    # def clean_product_name(self,name):
+    #     name = name.strip()
+    #     english_part = self.extract_english(name)
+    #     has_arabic = self.contains_arabic(name)
+    #     if english_part and has_arabic:
+    #         return english_part
+    #     if english_part and not has_arabic:
+    #         return english_part
+    #     return name
      
     # description from compatability        
     def build_item_description(self, item_code):
@@ -1137,6 +1160,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             item.item_woocommerce_server.woocommerce_id = wc_product.woocommerce_id
             item.item.flags.created_by_sync = True
             item.item.save()
+            frappe.db.commit()
         except Exception as e:
             frappe.log_error(f"Failed to update ERPNext item with WC ID: {e}")
         # a=item.item_woocommerce_server.woocommerce_id
@@ -1541,8 +1565,11 @@ def bulk_run_item_sync(items):
         job_name="bulk_wc_sync"
         
     )
-
-    return f"🕒 Sync started for {total_items} item(s) in background."
+    return {
+        "status": "queued",
+        "message": f"Sync started for {total_items} item(s) in background."
+    }
+    # return f"🕒 Sync started for {total_items} item(s) in background."
 def background_bulk_sync(items, total_items,user):
     success, failed = [], []
 
