@@ -578,7 +578,10 @@ class SynchroniseItem(SynchroniseWooCommerce):
         
         # push description
         # description_text = self.build_item_description(item.item.item_code)
-        description_text = self.strip_html(item.item.custom_woo_description)
+        description=item.item.custom_woo_description
+        description_text=""
+        if description:
+            description_text = self.strip_html(description)
         short_description=item.item.custom_woo__short_description
         self.push_wc_product(
             product_id,
@@ -669,7 +672,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 frappe.log_error("No Branch Stock Found", item.item.item_code)
 
         except Exception as e:
-            frappe.log_error("Branch Stock Sync Failed", str(e))\
+            frappe.log_error("Branch Stock Sync Failed", str(e))
 
         # 🏷 Sync Product Quantity / Stock 
         try:
@@ -759,23 +762,26 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
         main_cat = (item.item.category or "").strip()
         sub_cat = (item.item.sub_category or "").strip()
-        if main_cat:
-            parent_id = self.get_or_create_wc_category(main_cat)  
+        # 🔹 Translate before creating category
+        main_cat_ar = self.translate_text(main_cat) if main_cat else ""
+        sub_cat_ar = self.translate_text(sub_cat) if sub_cat else ""
+        if main_cat_ar:
+            parent_id = self.get_or_create_wc_category(main_cat_ar)  
             categories.append({"id": parent_id})
-            if sub_cat:
-                child_id = self.get_or_create_wc_category(sub_cat, parent_id)
+            if sub_cat_ar:
+                child_id = self.get_or_create_wc_category(sub_cat_ar, parent_id)
                 categories.append({"id": child_id})
         categories = [dict(t) for t in {tuple(d.items()) for d in categories}]
         if categories:
             try:
                 self.push_wc_product(product_id, categories=categories)
                 frappe.log_error(
-                    "Categories Synced (EN)",
+                    "Categories Synced",
                     f"Item: {item.item.item_name}, Categories: {categories}"
                 )
             except Exception:
                 frappe.log_error(
-                    "❌ Failed to sync categories (EN)",
+                    "❌ Failed to sync categories ",
                     f"{item.item.item_name}\n{frappe.get_traceback()}"
                 )
         
