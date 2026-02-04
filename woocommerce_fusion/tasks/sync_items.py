@@ -732,10 +732,13 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
         # push is spare parts or not
         is_spare_part = False
-        compatibility_entries = item.item.custom_compatibility or []
+        vin_required=item.item.custom_vin_required
+        if vin_required==1:
+            is_spare_part=True
+        # compatibility_entries = item.item.custom_compatibility or []
 
-        if compatibility_entries:
-            is_spare_part = True
+        # if compatibility_entries:
+        #     is_spare_part = True
         self.push_wc_product(
             product_id,
             meta={
@@ -762,7 +765,6 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
         main_cat = (item.item.category or "").strip()
         sub_cat = (item.item.sub_category or "").strip()
-        # 🔹 Translate before creating category
         main_cat_ar = self.translate_text(main_cat) if main_cat else ""
         sub_cat_ar = self.translate_text(sub_cat) if sub_cat else ""
         if main_cat_ar:
@@ -1422,12 +1424,16 @@ def clear_sync_hash_and_run_item_sync(item_code: str):
 
     if len(iwss) > 0:
         run_item_sync(item_code=item_code, enqueue=True)
+    
 def expand_years(text: str):
     results = []
 
+    # 🔧 normalize unicode dashes
+    text = text.replace("–", "-").replace("—", "-")
+
     def normalize(year: str, base=None):
         year = year.strip()
-        if len(year) == 2: 
+        if len(year) == 2:
             if base and len(base) == 4:
                 century = base[:2]
             else:
@@ -1449,8 +1455,39 @@ def expand_years(text: str):
                 results.append(str(y))
         else:
             results.append(normalize(part))
+
     results = sorted(set(results), key=int)
     return results
+
+# def expand_years(text: str):
+#     results = []
+
+#     def normalize(year: str, base=None):
+#         year = year.strip()
+#         if len(year) == 2: 
+#             if base and len(base) == 4:
+#                 century = base[:2]
+#             else:
+#                 century = "20"
+#             year = century + year
+#         return year
+
+#     parts = re.split(r"[,\s]+", text.strip())
+
+#     for part in parts:
+#         if not part:
+#             continue
+
+#         if "-" in part:
+#             start, end = part.split("-")
+#             start = normalize(start)
+#             end = normalize(end, base=start)
+#             for y in range(int(start), int(end) + 1):
+#                 results.append(str(y))
+#         else:
+#             results.append(normalize(part))
+#     results = sorted(set(results), key=int)
+#     return results
 
 @frappe.whitelist()
 def bulk_run_item_sync(items):
