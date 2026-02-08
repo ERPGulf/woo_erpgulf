@@ -500,13 +500,43 @@ class SynchroniseItem(SynchroniseWooCommerce):
         slug = re.sub(r'[^a-zA-Z0-9]+', '-', ascii_text).strip('-').lower()
         return slug[:max_length]
     
-    def strip_html(self,html_text: str) -> str:
+    # def strip_html(self,html_text: str) -> str:
+    #     from bs4 import BeautifulSoup
+    #     soup = BeautifulSoup(html_text, "html.parser")
+    #     text = soup.get_text(separator="\n")
+    #     return "\n".join(
+    #         line.strip() for line in text.splitlines() if line.strip()
+    #     )
+        
+    def strip_html(self, html_text: str) -> str:
         from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html_text, "html.parser")
-        text = soup.get_text(separator="\n")
-        return "\n".join(
-            line.strip() for line in text.splitlines() if line.strip()
-        )
+        import re
+
+        if not html_text:
+            return ""
+
+        # 🔧 Normalize escaped newlines
+        text = html_text
+
+        # Convert literal \n or \\n to real newline
+        text = text.replace("\\n", "\n")
+
+        # Remove lines that are just 'n'
+        text = re.sub(r'^\s*n\s*$', '', text, flags=re.MULTILINE)
+
+        # Parse HTML
+        soup = BeautifulSoup(text, "html.parser")
+        clean_text = soup.get_text(separator="\n")
+
+        # Final cleanup: remove extra empty lines
+        lines = [
+            line.strip()
+            for line in clean_text.splitlines()
+            if line.strip()
+        ]
+
+        return "\n".join(lines)
+            
         
     def update_woocommerce_product(
         self, wc_product: WooCommerceProduct, item: ERPNextItemToSync
