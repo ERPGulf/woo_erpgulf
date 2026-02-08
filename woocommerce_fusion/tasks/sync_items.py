@@ -514,21 +514,11 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
         if not html_text:
             return ""
-
-        # 🔧 Normalize escaped newlines
         text = html_text
-
-        # Convert literal \n or \\n to real newline
         text = text.replace("\\n", "\n")
-
-        # Remove lines that are just 'n'
         text = re.sub(r'^\s*n\s*$', '', text, flags=re.MULTILINE)
-
-        # Parse HTML
         soup = BeautifulSoup(text, "html.parser")
         clean_text = soup.get_text(separator="\n")
-
-        # Final cleanup: remove extra empty lines
         lines = [
             line.strip()
             for line in clean_text.splitlines()
