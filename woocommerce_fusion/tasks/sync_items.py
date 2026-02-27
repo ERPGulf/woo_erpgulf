@@ -23,6 +23,7 @@ from woocommerce_fusion.woocommerce.woocommerce_api import (
     generate_woocommerce_record_name_from_domain_and_id,
 )
 from woocommerce import API
+from frappe.utils import nowdate
 
 
 
@@ -55,16 +56,16 @@ def run_item_sync(
     Helper funtion that prepares arguments for item sync
     """
     # Validate inputs, at least one of the parameters should be provided
-    frappe.log_error(
-        title="run_item_sync Debug",
-        message=frappe.as_json({
-            "item_code": item_code,
-            "item": item.as_dict() if item else None,
-            "woocommerce_product_name": woocommerce_product_name,
-            "woocommerce_product": woocommerce_product.as_dict() if woocommerce_product else None,
-            "enqueue": enqueue,
-        })
-    )
+    # frappe.log_error(
+    #     title="run_item_sync Debug",
+    #     message=frappe.as_json({
+    #         "item_code": item_code,
+    #         "item": item.as_dict() if item else None,
+    #         "woocommerce_product_name": woocommerce_product_name,
+    #         "woocommerce_product": woocommerce_product.as_dict() if woocommerce_product else None,
+    #         "enqueue": enqueue,
+    #     })
+    # )
  
     if not any([item_code, item, woocommerce_product_name, woocommerce_product]):
         raise ValueError(
@@ -75,16 +76,16 @@ def run_item_sync(
 
     # Get ERPNext Item and WooCommerce product if they exist
     if woocommerce_product or woocommerce_product_name:
-        frappe.log_error("64")
+        # frappe.log_error("64")
         if not woocommerce_product:
-            frappe.log_error("66")
+            # frappe.log_error("66")
             woocommerce_product = frappe.get_doc(
                 {"doctype": "WooCommerce Product", "name": woocommerce_product_name}
             )
             woocommerce_product.load_from_db()
 
         # Trigger sync
-        frappe.log_error("73")
+        # frappe.log_error("73")
         sync = SynchroniseItem(woocommerce_product=woocommerce_product)
         if enqueue:
             frappe.enqueue(sync.run)
@@ -92,7 +93,7 @@ def run_item_sync(
             sync.run()
 
     elif item or item_code:
-        frappe.log_error("92")
+        # frappe.log_error("92")
         if not item:
             item = frappe.get_doc("Item", item_code)
             
@@ -119,11 +120,9 @@ def run_item_sync(
             )
             return (None, None)
         
-        # 🧠 --- END VALIDATION ---
         if not item.woocommerce_servers:
             frappe.throw(_("No WooCommerce Servers defined for Item {0}").format(item_code))
         for wc_server in item.woocommerce_servers:
-            # Trigger sync for every linked server
             sync = SynchroniseItem(
                 item=ERPNextItemToSync(item=item, item_woocommerce_server_idx=wc_server.idx)
             )
@@ -198,12 +197,14 @@ class SynchroniseItem(SynchroniseWooCommerce):
         if not servers:
             servers = frappe.get_all(
                 "WooCommerce Server",
-                fields=["woocommerce_server_url", "api_consumer_key", "api_consumer_secret", "enable_sync"],
+                fields=["name","woocommerce_server_url", "api_consumer_key", "api_consumer_secret", "enable_sync"],
                 filters={"enable_sync": 1},
                 limit=1
             )
         if servers and len(servers) > 0:
-            server = servers[0] if isinstance(servers[0], dict) else servers[0].as_dict()
+            server = servers[0] if isinstance(servers[0], dict) else servers[0].as_dict()             
+            self.server_name = server.get("name")
+            self.server_doc = frappe.get_cached_doc("WooCommerce Server", self.server_name)
             self.wcapi = API(url=server.get("woocommerce_server_url").rstrip('/'),consumer_key=server.get("api_consumer_key"),consumer_secret=server.get("api_consumer_secret"),version="wc/v3")
             self.consumer_key = server.get("api_consumer_key")
             self.consumer_secret = server.get("api_consumer_secret")
@@ -299,9 +300,9 @@ class SynchroniseItem(SynchroniseWooCommerce):
         """
         Syncronise Item between ERPNext and WooCommerce
         """
-        frappe.log_error("255")
+        # frappe.log_error("255")
         if self.item and not self.woocommerce_product:
-            frappe.log_error("no woo product" )
+            # frappe.log_error("no woo product" )
             # create missing product in WooCommerce
             self.create_woocommerce_product(self.item)
             # self.update_woocommerce_product(self.woocommerce_product, self.item)
@@ -310,7 +311,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             self.create_item(self.woocommerce_product)
         elif self.item and self.woocommerce_product:
             # both exist, check sync hash
-            frappe.log_error("264")
+            # frappe.log_error("264")
             self.update_woocommerce_product(self.woocommerce_product, self.item)
 
             # if (
@@ -334,7 +335,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         """
         Update the ERPNext Item with fields from it's corresponding WooCommerce Product
         """
-        frappe.log_error("new")
+        # frappe.log_error("new")
         return # Added this line bcs Woo to ERP not requred. only one side
         item_dirty = False
         if item.item.item_name != woocommerce_product.woocommerce_name:
@@ -461,7 +462,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 clean_name = self.clean_product_name(raw_name)
             # raw_name = item.item.item_name
             # clean_name = self.clean_product_name(raw_name)
-            frappe.log_error("clean_name",clean_name )
+            # frappe.log_error("clean_name",clean_name )
             
             wc_product = frappe.get_doc({
                 "doctype": "WooCommerce Product",
@@ -487,7 +488,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 self.update_woocommerce_product(self.woocommerce_product, item)
             except Exception as e:
                 frappe.log_error("Failed to update WooCommerce product after creation", str(e))
-            frappe.log_error(" Woo Bundle Synced Successfully")
+            # frappe.log_error(" Woo Bundle Synced Successfully")
         except Exception as e:
             frappe.log_error("🔥 Woo Bundle Creation Failed", frappe.get_traceback())
             return {}
@@ -542,7 +543,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         server = wc_server[0]
         if not server.enable_sync:
             return
-        frappe.log_error("351")
+        # frappe.log_error("351")
         # wc_product_dirty = False
         # is_bundle = frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code})		
         # raw_name = item.item.item_name
@@ -582,7 +583,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         # product_id = wc_product.id
         product_id = getattr(wc_product, "id", None) or wc_product.get("id") or wc_product.get("product_id")
         self.push_wc_product(product_id, sku=item.item.item_code)
-        frappe.log_error("item code",item.item.item_code)
+        # frappe.log_error("item code",item.item.item_code)
 
         # push images
         image_urls = str(item.item.custom_woo_image_url or "").strip()
@@ -618,10 +619,10 @@ class SynchroniseItem(SynchroniseWooCommerce):
                     product_id,
                     shipping_class=shipping_class
                 )
-                frappe.log_error(
-                    "Shipping class synced",
-                    f"Item: {item.item.item_name}, Shipping Class: {shipping_class}"
-                )
+                # frappe.log_error(
+                #     "Shipping class synced",
+                #     f"Item: {item.item.item_name}, Shipping Class: {shipping_class}"
+                # )
             except Exception as e:
                 frappe.log_error(
                     f"Failed to push shipping class for {item.item.item_name}: {e}"
@@ -658,41 +659,105 @@ class SynchroniseItem(SynchroniseWooCommerce):
         if wc_attributes:
             self.push_wc_product(product_id, attributes=wc_attributes)
 
-        # 🏷 Sync Branch-wise Stock dynamically
+        # 🏷 Sync Branch-wise Stock dynamically (Normal + Bundle Support)
         try:
-            bins = frappe.get_all(
-                "Bin",
-                filters={"item_code": item.item.item_code},
-                fields=["warehouse", "actual_qty"]
-            )
             meta_data = {}
-            branch_entries = [b for b in bins if b.actual_qty > 0]
+            bundle_name = frappe.db.get_value(
+                "Product Bundle",
+                {"new_item_code": item.item.item_code},
+                "name"
+            )
+            warehouse_stock_map = {}
+            if bundle_name:
+                bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
+                for bundle_item in bundle_doc.items:
+                    child_code = bundle_item.item_code
+                    required_qty = bundle_item.qty or 1
+                    child_bins = frappe.get_all(
+                        "Bin",
+                        filters={"item_code": child_code},
+                        fields=["warehouse", "actual_qty"]
+                    )
+                    for b in child_bins:
+                        if b.actual_qty <= 0:
+                            continue
+                        possible_bundle_qty = int(b.actual_qty // required_qty)
+                        if b.warehouse not in warehouse_stock_map:
+                            warehouse_stock_map[b.warehouse] = possible_bundle_qty
+                        else:
+                            warehouse_stock_map[b.warehouse] = min(
+                                warehouse_stock_map[b.warehouse],
+                                possible_bundle_qty
+                            )
 
-            for index, b in enumerate(branch_entries):
+            else:
+                bins = frappe.get_all(
+                    "Bin",
+                    filters={"item_code": item.item.item_code},
+                    fields=["warehouse", "actual_qty"]
+                )
+                for b in bins:
+                    if b.actual_qty > 0:
+                        warehouse_stock_map[b.warehouse] = int(b.actual_qty)
+            branch_entries = [
+                (warehouse, qty)
+                for warehouse, qty in warehouse_stock_map.items()
+                if qty > 0
+            ]
+            for index, (warehouse, qty) in enumerate(branch_entries):
                 branch_name = (
-                    b.warehouse
-                    .lower()                        
-                    .replace("warehouse", "")       
-                    .replace(" - ame", "")          
-                    .strip()                        
-                    .replace(" ", "-") + "-branch"  
+                    warehouse
+                    .lower()
+                    .replace("warehouse", "")
+                    .replace(" - ame", "")
+                    .strip()
+                    .replace(" ", "-") + "-branch"
                 )
                 meta_data[f"branch_stock_{index}_branch"] = branch_name
-                meta_data[f"branch_stock_{index}_stock_qty"] = int(b.actual_qty)
-
+                meta_data[f"branch_stock_{index}_stock_qty"] = int(qty)
             meta_data["branch_stock"] = len(branch_entries)
-
             if meta_data:
                 self.push_wc_product(product_id, meta=meta_data)
-                frappe.log_error(
-                    "Branch Stock Synced",
-                    f"Item: {item.item.item_code}, Meta: {meta_data}"
-                )
             else:
                 frappe.log_error("No Branch Stock Found", item.item.item_code)
-
         except Exception as e:
             frappe.log_error("Branch Stock Sync Failed", str(e))
+
+        # # 🏷 Sync Branch-wise Stock dynamically
+        # try:
+        #     bins = frappe.get_all(
+        #         "Bin",
+        #         filters={"item_code": item.item.item_code},
+        #         fields=["warehouse", "actual_qty"]
+        #     )
+        #     meta_data = {}
+        #     branch_entries = [b for b in bins if b.actual_qty > 0]
+
+        #     for index, b in enumerate(branch_entries):
+        #         branch_name = (
+        #             b.warehouse
+        #             .lower()                        
+        #             .replace("warehouse", "")       
+        #             .replace(" - ame", "")          
+        #             .strip()                        
+        #             .replace(" ", "-") + "-branch"  
+        #         )
+        #         meta_data[f"branch_stock_{index}_branch"] = branch_name
+        #         meta_data[f"branch_stock_{index}_stock_qty"] = int(b.actual_qty)
+
+        #     meta_data["branch_stock"] = len(branch_entries)
+
+        #     if meta_data:
+        #         self.push_wc_product(product_id, meta=meta_data)
+        #         # frappe.log_error(
+        #         #     "Branch Stock Synced",
+        #         #     f"Item: {item.item.item_code}, Meta: {meta_data}"
+        #         # )
+        #     else:
+        #         frappe.log_error("No Branch Stock Found", item.item.item_code)
+
+        # except Exception as e:
+        #     frappe.log_error("Branch Stock Sync Failed", str(e))
 
         # 🏷 Sync Product Quantity / Stock 
         try:
@@ -717,38 +782,143 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 backorders=backorders  
             )
 
-            frappe.log_error(
-                "Stock synced",
-                f"Item: {item.item.item_code}, Qty: {total_qty}, "
-                f"Status: {stock_status}, Backorders: {backorders}"
-            )
+            # frappe.log_error(
+            #     "Stock synced",
+            #     f"Item: {item.item.item_code}, Qty: {total_qty}, "
+            #     f"Status: {stock_status}, Backorders: {backorders}"
+            # )
 
         except Exception as e:
             frappe.log_error("Stock sync failed", str(e))
 
-        # 🏷 Sync Price
+        # 🏷 Sync Price 
         try:
+            from frappe.utils import getdate
+            from datetime import date
             price_doc = frappe.get_all(
                 "Item Price",
-                filters={"item_code": item.item.item_code, "price_list": "Standard Selling"},  # Adjust price list if needed
+                filters={
+                    "item_code": item.item.item_code,
+                    "price_list": "Standard Selling"
+                },
                 fields=["price_list_rate"],
                 limit=1
             )
 
-            price = price_doc[0].price_list_rate if price_doc else 0.0
+            original_price = price_doc[0].price_list_rate if price_doc else 0.0
+            sale_price = original_price
+            offer_name = frappe.db.get_value(
+                "WooCommerce Server",
+                self.server_doc.name,
+                "custom_offer_list"
+            )
+
+            exclude_doc_name = frappe.db.get_value(
+                "WooCommerce Server",
+                self.server_doc.name,
+                "custom_exclude_offer_list"
+            )
+            offer = frappe.get_doc("POS Offer", offer_name) if offer_name else None
+            exclude_doc = frappe.get_doc("Exclude Offer", exclude_doc_name) if exclude_doc_name else None
+            is_globally_excluded = False
+            if exclude_doc:
+                for row in exclude_doc.item_exclude_from_all_offer:
+                    # frappe.log_error("Checking global exclusion", f"Row item: {row.item}, Item code: {item.item.item_code}")
+                    if row.item == item.item.item_code:
+                        is_globally_excluded = True
+                        break
+                if not is_globally_excluded:
+                    for row in exclude_doc.item_group:
+                        if row.item_group == item.item.item_group:
+                            is_globally_excluded = True
+                            break
+                if not is_globally_excluded:
+                    for row in exclude_doc.brand_exclude_from_all_offer:
+                        if row.brand == item.item.brand:
+                            is_globally_excluded = True
+                            break
+            if not is_globally_excluded and offer:
+                today = getdate()
+                start_valid = (
+                    not offer.valid_from
+                    or today >= getdate(offer.valid_from)
+                )
+                end_valid = (
+                    not offer.valid_upto
+                    or today <= getdate(offer.valid_upto)
+                )
+                if offer.auto == 1 and start_valid and end_valid:
+                    is_offer_excluded = False
+                    if exclude_doc:
+                        for row in exclude_doc.pos_offer:
+                            if row.pos_offer == offer.name:
+                                if row.item and row.item == item.item.item_code:
+                                    is_offer_excluded = True
+                                    break
+                                if row.item_group and row.item_group == item.item.item_group:
+                                    is_offer_excluded = True
+                                    break
+                                if row.brand and row.brand == item.item.brand:
+                                    is_offer_excluded = True
+                                    break
+                    apply_offer = False
+                    if offer.apply_on == "Item Code":
+                        apply_offer = (offer.item == item.item.item_code)
+                    elif offer.apply_on == "Item Group":
+                        apply_offer = (offer.item_group == item.item.item_group)
+                    elif offer.apply_on == "Brand":
+                        apply_offer = (offer.brand == item.item.brand)
+                    elif offer.apply_on == "Transaction":
+                        apply_offer = True
+                    if not is_offer_excluded and apply_offer and offer.discount_percentage:
+                        discount_amount = (
+                            original_price * offer.discount_percentage / 100
+                        )
+                        sale_price = original_price - discount_amount
+                        # frappe.log_error(
+                        #     "Offer Applied",
+                        #     f"""
+                        #     Item: {item.item.item_code}
+                        #     Offer: {offer.name}
+                        #     Original: {original_price}
+                        #     Discount: {offer.discount_percentage}%
+                        #     Sale Price: {sale_price}
+                        #     """
+                        # )
             self.push_wc_product(
                 product_id,
-                regular_price=str(price),
-                _price=str(price)
+                regular_price=str(round(original_price, 2)),
+                sale_price=str(round(sale_price, 2)),
             )
-
-            frappe.log_error(
-                "Price synced",
-                f"Item: {item.item.item_code}, Regular & Sale Price: {price}"
-            )
-
+            # frappe.log_error(
+            #     "Price Synced",
+            #     f"Item: {item.item.item_code}, Regular: {original_price}, Sale: {sale_price}"
+            # )
         except Exception as e:
             frappe.log_error("Price sync failed", str(e))
+        # # 🏷 Sync Price
+        # try:
+        #     price_doc = frappe.get_all(
+        #         "Item Price",
+        #         filters={"item_code": item.item.item_code, "price_list": "Standard Selling"},
+        #         fields=["price_list_rate"],
+        #         limit=1
+        #     )
+
+        #     price = price_doc[0].price_list_rate if price_doc else 0.0
+        #     self.push_wc_product(
+        #         product_id,
+        #         regular_price=str(price),
+        #         _price=str(price)
+        #     )
+
+        #     frappe.log_error(
+        #         "Price synced",
+        #         f"Item: {item.item.item_code}, Regular & Sale Price: {price}"
+        #     )
+
+        # except Exception as e:
+        #     frappe.log_error("Price sync failed", str(e))
 
         # push is spare parts or not
         is_spare_part = False
@@ -775,8 +945,8 @@ class SynchroniseItem(SynchroniseWooCommerce):
             meta_data["_add_compactable_details"] = "field_68e38a56a4d82"
             self.push_wc_product(product_id, meta=meta_data)
 
-            frappe.log_error("Compatibility Synced",
-                            f"Item: {item.item.item_name}, Total Rows: {count}")
+            # frappe.log_error("Compatibility Synced",
+            #                 f"Item: {item.item.item_name}, Total Rows: {count}")
         else:
             frappe.log_error("No Compatibility Found", item.item.item_name)
         
@@ -797,10 +967,10 @@ class SynchroniseItem(SynchroniseWooCommerce):
         if categories:
             try:
                 self.push_wc_product(product_id, categories=categories)
-                frappe.log_error(
-                    "Categories Synced",
-                    f"Item: {item.item.item_name}, Categories: {categories}"
-                )
+                # frappe.log_error(
+                #     "Categories Synced",
+                #     f"Item: {item.item.item_name}, Categories: {categories}"
+                # )
             except Exception:
                 frappe.log_error(
                     "❌ Failed to sync categories ",
@@ -814,8 +984,8 @@ class SynchroniseItem(SynchroniseWooCommerce):
             offer_id = self.get_or_create_wc_offer_category(offer_name)
             offer_categories.append(offer_id)
             
-        if self.push_wc_product(product_id, offer_category=offer_categories):
-            frappe.log_error("offer category pushed",offer_categories)
+        self.push_wc_product(product_id, offer_category=offer_categories)
+            # frappe.log_error("offer category pushed",offer_categories)
         
         #  Sync "Bought Together" Items
         try:
@@ -855,10 +1025,10 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
                     if wc_ids:
                         self.push_wc_product(product_id, bundle_product_items=wc_ids)
-                        frappe.log_error(
-                            "✅ Bought Together Synced",
-                            f"Item: {current_item_code}, Bundle Product Items: {wc_ids}"
-                        )
+                        # frappe.log_error(
+                        #     "✅ Bought Together Synced",
+                        #     f"Item: {current_item_code}, Bundle Product Items: {wc_ids}"
+                        # )
 
             if not invoices or not wc_ids:
                 random_items = frappe.get_all(
@@ -872,10 +1042,10 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 if random_items:
                     wc_ids = [str(i["woocommerce_id"]) for i in random_items if i.get("woocommerce_id")]
                     self.push_wc_product(product_id, bundle_product_items=wc_ids)
-                    frappe.log_error(
-                        " No invoices found — pushed random Bought Together items",
-                        f"Item: {current_item_code}, Random Bundle Product Items: {wc_ids}"
-                    )
+                    # frappe.log_error(
+                    #     " No invoices found — pushed random Bought Together items",
+                    #     f"Item: {current_item_code}, Random Bundle Product Items: {wc_ids}"
+                    # )
                 else:
                     frappe.log_error(" No random items available for Bought Together fallback", current_item_code)
 
@@ -1077,11 +1247,10 @@ class SynchroniseItem(SynchroniseWooCommerce):
         Create the WooCommerce Product with fields from its corresponding ERPNext Item.
         Fully robust against missing data and ensures wc_product is always valid.
         """
-        frappe.log_error("creating ")
         wc_product = None
         is_bundle = frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code})
         if is_bundle:
-            frappe.log_error("its a bundle")
+            # frappe.log_error("its a bundle")
             self.create_bundle_product(item, getattr(item.item_woocommerce_server, "woocommerce_id", None))
             return
         # Attempt to get existing WooCommerce Product if it exists
@@ -1547,7 +1716,7 @@ def background_bulk_sync(items, total_items,user):
     ✅ Success: {len(success)} items<br>
     ❌ Failed: {len(failed)} items<br><br>
     """
-    frappe.log_error("WC Bulk Sync Summary", message)
+    # frappe.log_error("WC Bulk Sync Summary", message)
     # Optional: send user notification
     frappe.publish_realtime(
         event="wc_bulk_sync_complete",
