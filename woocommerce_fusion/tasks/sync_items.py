@@ -1693,7 +1693,7 @@ def bulk_run_item_sync(items):
         total_items=total_items,
         user=user,
         queue="long",
-        timeout=28800,
+        timeout=86400,
         job_name="bulk_wc_sync"
         
     )
