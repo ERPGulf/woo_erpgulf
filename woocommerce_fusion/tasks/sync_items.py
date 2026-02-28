@@ -1678,48 +1678,135 @@ def expand_years(text: str):
 #     results = sorted(set(results), key=int)
 #     return results
 
+# @frappe.whitelist()
+# def bulk_run_item_sync(items):
+#     if isinstance(items, str):
+#         import json
+#         items = json.loads(items)
+
+#     total_items = len(items)
+#     user = frappe.session.user
+
+#     frappe.enqueue(
+#         "woocommerce_fusion.tasks.sync_items.background_bulk_sync",
+#         items=items,
+#         total_items=total_items,
+#         user=user,
+#         queue="long",
+#         timeout=86400,
+#         job_name="bulk_wc_sync"
+        
+#     )
+#     return {
+#         "status": "queued",
+#         "message": f"Sync started for {total_items} item(s) in background."
+#     }
+# def background_bulk_sync(items, total_items,user):
+#     success, failed = [], []
+
+#     for idx, item_code in enumerate(items, start=1):
+#         try:
+#             run_item_sync(item_code=item_code, enqueue=False)
+#             success.append(item_code)
+#         except Exception:
+#             failed.append(item_code)
+
+#     message = f"""
+#     WooCommerce Sync Completed<br><br>
+#     ✅ Success: {len(success)} items<br>
+#     ❌ Failed: {len(failed)} items<br><br>
+#     """
+#     # frappe.log_error("WC Bulk Sync Summary", message)
+#     # Optional: send user notification
+#     frappe.publish_realtime(
+#         event="wc_bulk_sync_complete",
+#         message=message,
+#         user=user 
+#     )
+
+CHUNK_SIZE = 10 
 @frappe.whitelist()
 def bulk_run_item_sync(items):
+    """
+    Entry point for bulk WooCommerce sync.
+    Starts chunk chain instead of one massive background job.
+    """
     if isinstance(items, str):
-        import json
         items = json.loads(items)
 
     total_items = len(items)
-    user = frappe.session.user
+    total_chunks = -(-total_items // CHUNK_SIZE)
 
     frappe.enqueue(
-        "woocommerce_fusion.tasks.sync_items.background_bulk_sync",
+        "woocommerce_fusion.tasks.sync_items.background_bulk_sync_chunk",
         items=items,
-        total_items=total_items,
-        user=user,
+        chunk_index=0,
+        success=[],
+        failed=[],
+        user=frappe.session.user,
         queue="long",
-        timeout=86400,
-        job_name="bulk_wc_sync"
-        
+        timeout=3600,
+        job_name="wc_sync_chunk_0",
     )
+
     return {
         "status": "queued",
-        "message": f"Sync started for {total_items} item(s) in background."
+        "message": f"Bulk sync started",
+        "total_items": total_items,
+        "total_chunks": total_chunks,
     }
-def background_bulk_sync(items, total_items,user):
-    success, failed = [], []
 
-    for idx, item_code in enumerate(items, start=1):
+
+def background_bulk_sync_chunk(items, chunk_index, success=None, failed=None, user=None):
+    """
+    Processes one chunk of items, then enqueues the next chunk.
+    """
+
+    frappe.set_user(user or "Administrator")
+
+    success = success or []
+    failed = failed or []
+
+    total = len(items)
+    start = chunk_index * CHUNK_SIZE
+    end = min(start + CHUNK_SIZE, total)
+    chunk = items[start:end]
+
+    if not chunk:
+        return
+
+    for item_code in chunk:
         try:
+            # frappe.log_error(f"Starting sync for item {item_code} (chunk {chunk_index + 1})", "")
             run_item_sync(item_code=item_code, enqueue=False)
             success.append(item_code)
         except Exception:
             failed.append(item_code)
 
-    message = f"""
-    WooCommerce Sync Completed<br><br>
-    ✅ Success: {len(success)} items<br>
-    ❌ Failed: {len(failed)} items<br><br>
-    """
-    # frappe.log_error("WC Bulk Sync Summary", message)
-    # Optional: send user notification
-    frappe.publish_realtime(
-        event="wc_bulk_sync_complete",
-        message=message,
-        user=user 
-    )
+    if end < total:
+        next_chunk_index = chunk_index + 1
+
+        frappe.enqueue(
+            "woocommerce_fusion.tasks.sync_items.background_bulk_sync_chunk",
+            items=items,
+            chunk_index=next_chunk_index,
+            success=success,
+            failed=failed,
+            user=user,
+            queue="long",
+            timeout=3600,
+            job_name=f"wc_sync_chunk_{next_chunk_index}",
+        )
+
+    else:
+        message = f"""
+        WooCommerce Sync Completed<br><br>
+        ✅ Success: {len(success)} items<br>
+        ❌ Failed: {len(failed)} items<br><br>
+        """
+
+        frappe.publish_realtime(
+            event="wc_bulk_sync_complete",
+            message=message,
+            user=user
+        )
