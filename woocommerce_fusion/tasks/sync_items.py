@@ -543,42 +543,43 @@ class SynchroniseItem(SynchroniseWooCommerce):
         server = wc_server[0]
         if not server.enable_sync:
             return
+        
+        
         # frappe.log_error("351")
-        # wc_product_dirty = False
-        # is_bundle = frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code})		
-        # raw_name = item.item.item_name
-        # clean_name=item.item.custom_woo_name__arabic
-        # if not clean_name:
-        #     clean_name = self.clean_product_name(raw_name)
-        # if wc_product.woocommerce_name != clean_name and not is_bundle:
-        #     wc_product.woocommerce_name = clean_name
-        #     wc_product_dirty = True
-        # if is_bundle:
-        #     bundle_name = frappe.db.get_value("Product Bundle", {"new_item_code": item.item.item_code}, "name")
-        #     if bundle_name:
-        #         bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
-        #         wc_product.woocommerce_name = (bundle_doc.description or "").strip() or clean_name
-        #         wc_product_dirty = True
+        wc_product_dirty = False
+        is_bundle = frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code})		
+        raw_name = item.item.item_name
+        clean_name=item.item.custom_woo_name__arabic
+        if not clean_name:
+            clean_name = self.clean_product_name(raw_name)
+        if wc_product.woocommerce_name != clean_name and not is_bundle:
+            wc_product.woocommerce_name = clean_name
+            wc_product_dirty = True
+        if is_bundle:
+            bundle_name = frappe.db.get_value("Product Bundle", {"new_item_code": item.item.item_code}, "name")
+            if bundle_name:
+                bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
+                wc_product.woocommerce_name = (bundle_doc.description or "").strip() or clean_name
+                wc_product_dirty = True
                 
-        # # Ensure slug is short and cleaned
         # short_slug = self.clean_slug(wc_product.woocommerce_name)
         # wc_product.slug = short_slug
         # wc_product_dirty = True
         # product_fields_changed, wc_product = self.set_product_fields(wc_product, item)
         # if product_fields_changed:
-        #     frappe.log_error("7")
-        #     wc_product_dirty = True
-        # if wc_product_dirty:
-        #     frappe.log_error("8")
-        #     # wc_product.save()
-        #     try:
-        #         wc_product.save()
-        #     except Exception as e:
-        #         frappe.log_error(
-        #             title="wc_product.save() failed",
-        #             message=frappe.get_traceback()
-        #         )
-        #         return
+            # wc_product_dirty = True
+        if wc_product_dirty:
+            # wc_product.save()
+            try:
+                wc_product.save()
+            except Exception as e:
+                frappe.log_error(
+                    title="wc_product.save() failed",
+                    message=frappe.get_traceback()
+                )
+                return
+
+
 
         # product_id = wc_product.id
         product_id = getattr(wc_product, "id", None) or wc_product.get("id") or wc_product.get("product_id")
