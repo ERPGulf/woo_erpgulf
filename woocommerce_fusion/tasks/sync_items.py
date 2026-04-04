@@ -568,6 +568,18 @@ class SynchroniseItem(SynchroniseWooCommerce):
         # product_fields_changed, wc_product = self.set_product_fields(wc_product, item)
         # if product_fields_changed:
             # wc_product_dirty = True
+            
+        slug_source = wc_product.woocommerce_name or item.item.item_code
+        short_slug = self.clean_slug(slug_source)
+        # frappe.log_error("short_slug",short_slug)
+        if not short_slug:
+            short_slug = item.item.item_code.lower()
+        short_slug = short_slug[:140]
+        if wc_product.slug != short_slug:
+            wc_product.slug = short_slug
+            wc_product_dirty = True
+            
+            
         if wc_product_dirty:
             # wc_product.save()
             try:
@@ -940,7 +952,6 @@ class SynchroniseItem(SynchroniseWooCommerce):
         
         # ✅ Build compatibility data dynamically from ERPNext child table
         meta_data, count = self.build_compatibility_data(item.item.item_code)
-
         if count > 0:
             meta_data["add_compactable_details"] = str(count)
             meta_data["_add_compactable_details"] = "field_68e38a56a4d82"
@@ -950,6 +961,18 @@ class SynchroniseItem(SynchroniseWooCommerce):
             #                 f"Item: {item.item.item_name}, Total Rows: {count}")
         else:
             frappe.log_error("No Compatibility Found", item.item.item_name)
+            
+            
+        # ✅ Universal Product (ACF True/False)
+        is_universal = "1" if count == 0 else "0"
+        # frappe.log_error("is_universal",is_universal)
+        self.push_wc_product(
+            product_id,
+            meta={
+                "universal_product": is_universal,
+                "_universal_product": "field_69cf69755b698"
+            }
+        )
         
         # # --- Push product categories ---
         categories = []
@@ -1052,6 +1075,25 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
         except Exception as e:
             frappe.log_error("❌ Bought Together Sync Failed", str(e))
+        
+        # push description
+        self.push_wc_product(
+            product_id,
+            description=description_text,
+            short_description=short_description,
+        )
+
+        # ✅ push manufacturer brand
+        brand = item.item.brand or ""
+        # frappe.log_error("brand",brand)
+        if brand:
+            self.push_wc_product(
+                product_id,
+                meta={
+                    "manufacturer_brand": brand,
+                    "_manufacturer_brand": "field_69ce4ef9cd32d"
+                }
+            )
             
     import re
     def contains_arabic(self,text):
