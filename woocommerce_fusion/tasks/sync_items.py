@@ -557,7 +557,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             wc_product_dirty = True
         if is_bundle:
             bundle_name = frappe.db.get_value("Product Bundle", {"new_item_code": item.item.item_code}, "name")
-            if bundle_name:
+            if bundle_name and wc_product.woocommerce_name !=bundle_name:
                 bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
                 wc_product.woocommerce_name = (bundle_doc.description or "").strip() or clean_name
                 wc_product_dirty = True
@@ -569,15 +569,15 @@ class SynchroniseItem(SynchroniseWooCommerce):
         # if product_fields_changed:
             # wc_product_dirty = True
             
-        # slug_source = wc_product.woocommerce_name or item.item.item_code
-        # short_slug = self.clean_slug(slug_source)
-        # # frappe.log_error("short_slug",short_slug)
-        # if not short_slug:
-        #     short_slug = item.item.item_code.lower()
-        # short_slug = short_slug[:140]
-        # if wc_product.slug != short_slug:
-        #     wc_product.slug = short_slug
-        #     wc_product_dirty = True
+        slug_source = wc_product.woocommerce_name or item.item.item_code
+        short_slug = self.clean_slug(slug_source)
+        # frappe.log_error("short_slug",short_slug)
+        if not short_slug:
+            short_slug = item.item.item_code.lower()
+        short_slug = short_slug[:140]
+        if wc_product.slug != short_slug:
+            wc_product.slug = short_slug
+            wc_product_dirty = True
             
             
         if wc_product_dirty:
