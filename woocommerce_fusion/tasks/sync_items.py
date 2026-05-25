@@ -876,11 +876,19 @@ class SynchroniseItem(SynchroniseWooCommerce):
                                     break
                     apply_offer = False
                     if offer.apply_on == "Item Code":
-                        apply_offer = (offer.item == item.item.item_code)
+                        # apply_offer = (offer.item == item.item.item_code)
+                        for row in offer.apply_rule_on_item_code:
+                            if row.item == item.item.item_code:
+                                apply_offer = True
+                                break
                     elif offer.apply_on == "Item Group":
                         apply_offer = (offer.item_group == item.item.item_group)
                     elif offer.apply_on == "Brand":
-                        apply_offer = (offer.brand == item.item.brand)
+                        # apply_offer = (offer.brand == item.item.brand)
+                        for row in offer.apply_brand:
+                            if row.brand == item.item.brand:
+                                apply_offer = True
+                                break
                     elif offer.apply_on == "Transaction":
                         apply_offer = True
                     if not is_offer_excluded and apply_offer and offer.discount_percentage:
