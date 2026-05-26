@@ -583,10 +583,9 @@ class SynchroniseItem(SynchroniseWooCommerce):
         if wc_product_dirty:
             try:
                 # ✅ Only save if name has valid domain::id format
-                if wc_product.name and '::' in str(wc_product.name):
+                if wc_product.name and ('::' in str(wc_product.name) or '~' in str(wc_product.name)):
                     wc_product.save()
                 else:
-                    # Name not yet in correct format — skip save, push directly
                     frappe.log_error(
                         "wc_product.save() skipped",
                         f"Invalid name format: {wc_product.name} — will push via API directly"
@@ -601,7 +600,14 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
 
         # product_id = wc_product.id
-        product_id = getattr(wc_product, "id", None) or wc_product.get("id") or wc_product.get("product_id")
+        product_id = (
+            getattr(wc_product, "woocommerce_id", None)
+            or getattr(wc_product, "id", None)
+            or wc_product.get("woocommerce_id")
+            or wc_product.get("id")
+            or wc_product.get("product_id")
+        )
+        frappe.log_error("product_id resolved", f"{product_id} from wc_product.name={wc_product.name}")
         self.push_wc_product(product_id, sku=item.item.item_code)
         # frappe.log_error("item code",item.item.item_code)
 
