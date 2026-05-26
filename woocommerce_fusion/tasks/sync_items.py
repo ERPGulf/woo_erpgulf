@@ -1115,13 +1115,40 @@ class SynchroniseItem(SynchroniseWooCommerce):
                     "_manufacturer_brand": "field_69ce4ef9cd32d"
                 }
             )
-        # ✅ Sync Kit Options (Position / Side / Type)
-        frappe.log_error("Kit Options Check", f"Item: {item.item.item_code}")
+        # ✅ Rebuild woosb_ids for bundle products
         if frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code}):
-            frappe.log_error("Kit Options: IS Bundle", item.item.item_code)
+            try:
+                bundle_name = frappe.db.get_value(
+                    "Product Bundle",
+                    {"new_item_code": item.item.item_code},
+                    "name"
+                )
+                bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
+                woosb_ids = {}
+                for idx, bi in enumerate(bundle_doc.items):
+                    wc_id = frappe.db.get_value(
+                        "Item WooCommerce Server",
+                        {"parent": bi.item_code},
+                        "woocommerce_id"
+                    )
+                    if wc_id:
+                        woosb_ids[f"k{idx}"] = {
+                            "id": str(wc_id),
+                            "sku": bi.item_code,
+                            "qty": str(int(bi.qty or 1)),
+                            "min": "",
+                            "max": ""
+                        }
+                if woosb_ids:
+                    self.push_wc_product(product_id, meta=[
+                        {"key": "woosb_ids", "value": woosb_ids}
+                    ])
+            except Exception as e:
+                frappe.log_error("woosb_ids rebuild failed", str(e))
+
+        # ✅ Sync Kit Options (Position / Side / Type)
+        if frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code}):
             self.sync_kit_options(item, product_id)
-        else:
-            frappe.log_error("Kit Options: NOT Bundle", item.item.item_code)
             
     import re
     def contains_arabic(self,text):
