@@ -581,15 +581,22 @@ class SynchroniseItem(SynchroniseWooCommerce):
             
             
         if wc_product_dirty:
-            # wc_product.save()
             try:
-                wc_product.save()
+                # ✅ Only save if name has valid domain::id format
+                if wc_product.name and '::' in str(wc_product.name):
+                    wc_product.save()
+                else:
+                    # Name not yet in correct format — skip save, push directly
+                    frappe.log_error(
+                        "wc_product.save() skipped",
+                        f"Invalid name format: {wc_product.name} — will push via API directly"
+                    )
             except Exception as e:
                 frappe.log_error(
                     title="wc_product.save() failed",
                     message=frappe.get_traceback()
                 )
-                return
+                # ✅ Don't return — continue with push_wc_product below
 
 
 
@@ -1102,6 +1109,13 @@ class SynchroniseItem(SynchroniseWooCommerce):
                     "_manufacturer_brand": "field_69ce4ef9cd32d"
                 }
             )
+        # ✅ Sync Kit Options (Position / Side / Type)
+        frappe.log_error("Kit Options Check", f"Item: {item.item.item_code}")
+        if frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code}):
+            frappe.log_error("Kit Options: IS Bundle", item.item.item_code)
+            self.sync_kit_options(item, product_id)
+        else:
+            frappe.log_error("Kit Options: NOT Bundle", item.item.item_code)
             
     import re
     def contains_arabic(self,text):
@@ -1572,6 +1586,88 @@ class SynchroniseItem(SynchroniseWooCommerce):
             1,
             update_modified=False,
         )
+    def sync_kit_options(self, item, product_id):
+        """Sync kit Position/Side/Type options to WooCommerce ACF meta"""
+        try:
+            bundle_name = frappe.db.get_value(
+                "Product Bundle",
+                {"new_item_code": item.item.item_code},
+                "name"
+            )
+            if not bundle_name:
+                return
+
+            bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
+            valid_rows = []
+
+            for row in bundle_doc.items:
+                # ✅ ERPNext prefixes custom fields with custom_
+                position = row.get("custom_position") or ""
+                side     = row.get("custom_side") or ""
+                opt_type = row.get("custom_type") or ""
+
+                # Skip rows with no options set
+                if not any([position, side, opt_type]):
+                    continue
+
+                # Get WooCommerce ID for this child item
+                wc_id = frappe.db.get_value(
+                    "Item WooCommerce Server",
+                    {"parent": row.item_code},
+                    "woocommerce_id"
+                )
+                if not wc_id:
+                    frappe.log_error(
+                        "Kit Options: No WC ID",
+                        f"Item {row.item_code} has no WooCommerce ID"
+                    )
+                    continue
+
+                valid_rows.append({
+                    "wc_id":    int(wc_id),
+                    "position": position,
+                    "side":     side,
+                    "type":     opt_type,
+                })
+
+            if not valid_rows:
+                # frappe.log_error("Kit Options: No valid rows", item.item.item_code)
+                return
+
+            # ── Build ACF repeater meta for kit PARENT ──
+            meta = {
+                "kit_variants":  len(valid_rows),
+                "_kit_variants": "field_kit_variants",
+            }
+            for idx, row in enumerate(valid_rows):
+                meta[f"kit_variants_{idx}_option_position"]  = row["position"]
+                meta[f"_kit_variants_{idx}_option_position"] = "field_kit_variant_position"
+                meta[f"kit_variants_{idx}_option_side"]      = row["side"]
+                meta[f"_kit_variants_{idx}_option_side"]     = "field_kit_variant_side"
+                meta[f"kit_variants_{idx}_option_type"]      = row["type"]
+                meta[f"_kit_variants_{idx}_option_type"]     = "field_kit_variant_type"
+                meta[f"kit_variants_{idx}_variant_product"]  = str(row["wc_id"])
+                meta[f"_kit_variants_{idx}_variant_product"] = "field_kit_variant_product"
+
+            # Push to kit parent product
+            frappe.log_error("Kit Options: Pushing to parent", f"product_id={product_id}, meta={meta}")
+            self.push_wc_product(product_id, meta=meta)
+            # frappe.log_error("Kit Options Synced", f"Kit: {item.item.item_code}, Rows: {valid_rows}")
+
+            # ── Push part_of_kit to each CHILD product ──
+            for row in valid_rows:
+                frappe.log_error("Kit Options: Pushing to child", f"wc_id={row['wc_id']}, parent_id={product_id}")
+                self.push_wc_product(
+                    row["wc_id"],
+                    meta={
+                        "part_of_kit":  str(product_id),
+                        "_part_of_kit": "field_part_of_kit"
+                    }
+                )
+
+        except Exception as e:
+            frappe.log_error("Kit options sync failed", frappe.get_traceback())
+        
 
 
 def get_list_of_wc_products(
@@ -1975,3 +2071,5 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
             frappe.cache().delete_value(cache_key)
         else:
             enqueue_next_chunk(user)
+
+
