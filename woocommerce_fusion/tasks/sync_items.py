@@ -1667,17 +1667,41 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 # frappe.log_error("Kit Options: No valid rows", item.item.item_code)
                 return
 
+            # ── Arabic translation map ──
+            position_ar = {
+                "Front": "أمامي", "Rear": "خلفي",
+                "Upper": "علوي", "Lower": "سفلي",
+                "Upper Front": "علوي أمامي", "Upper Rear": "علوي خلفي",
+                "Lower Front": "سفلي أمامي", "Lower Rear": "سفلي خلفي",
+                "Center": "مركزي", "Top": "علوي",
+                "Bottom": "سفلي", "Middle": "وسطي",
+            }
+            side_ar = {
+                "Left": "يسار", "Right": "يمين",
+                "Driver Side": "جانب السائق",
+                "Passenger Side": "جانب الراكب",
+            }
+            type_ar = {
+                "Inner": "داخلي", "Outer": "خارجي",
+                "Complete Set": "طقم كامل", "Full Kit": "طقم كامل",
+                "Pair": "زوج", "Single": "قطعة واحدة",
+                "Long": "طويل", "Short": "قصير",
+                "Primary": "رئيسي", "Secondary": "ثانوي",
+                "Head": "رأس", "Block": "بلوك",
+                "Intake": "سحب", "Exhaust": "عادم",
+            }
+
             # ── Build ACF repeater meta for kit PARENT ──
             meta = {
                 "kit_variants":  len(valid_rows),
                 "_kit_variants": "field_kit_variants",
             }
             for idx, row in enumerate(valid_rows):
-                meta[f"kit_variants_{idx}_option_position"]  = row["position"]
+                meta[f"kit_variants_{idx}_option_position"]  = position_ar.get(row["position"], row["position"])
                 meta[f"_kit_variants_{idx}_option_position"] = "field_kit_variant_position"
-                meta[f"kit_variants_{idx}_option_side"]      = row["side"]
+                meta[f"kit_variants_{idx}_option_side"]      = side_ar.get(row["side"], row["side"])
                 meta[f"_kit_variants_{idx}_option_side"]     = "field_kit_variant_side"
-                meta[f"kit_variants_{idx}_option_type"]      = row["type"]
+                meta[f"kit_variants_{idx}_option_type"]      = type_ar.get(row["type"], row["type"])
                 meta[f"_kit_variants_{idx}_option_type"]     = "field_kit_variant_type"
                 meta[f"kit_variants_{idx}_variant_product"]  = str(row["wc_id"])
                 meta[f"_kit_variants_{idx}_variant_product"] = "field_kit_variant_product"
