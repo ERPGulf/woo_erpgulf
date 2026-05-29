@@ -1635,12 +1635,13 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
             for row in bundle_doc.items:
                 # ✅ ERPNext prefixes custom fields with custom_
-                position = row.get("custom_position") or ""
-                side     = row.get("custom_side") or ""
-                opt_type = row.get("custom_type") or ""
+                position  = row.get("custom_position") or ""
+                side      = row.get("custom_side") or ""
+                opt_type  = row.get("custom_type") or ""
+                pack_size = row.get("custom_pack_size") or 0
 
                 # Skip rows with no options set
-                if not any([position, side, opt_type]):
+                if not any([position, side, opt_type, pack_size]):
                     continue
 
                 # Get WooCommerce ID for this child item
@@ -1657,10 +1658,11 @@ class SynchroniseItem(SynchroniseWooCommerce):
                     continue
 
                 valid_rows.append({
-                    "wc_id":    int(wc_id),
-                    "position": position,
-                    "side":     side,
-                    "type":     opt_type,
+                    "wc_id":     int(wc_id),
+                    "position":  position,
+                    "side":      side,
+                    "type":      opt_type,
+                    "pack_size": int(pack_size) if pack_size else 0,
                 })
 
             if not valid_rows:
@@ -1701,8 +1703,8 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 meta[f"_kit_variants_{idx}_option_position"] = "field_kit_variant_position"
                 meta[f"kit_variants_{idx}_option_side"]      = side_ar.get(row["side"], row["side"])
                 meta[f"_kit_variants_{idx}_option_side"]     = "field_kit_variant_side"
-                meta[f"kit_variants_{idx}_option_type"]      = type_ar.get(row["type"], row["type"])
-                meta[f"_kit_variants_{idx}_option_type"]     = "field_kit_variant_type"
+                meta[f"kit_variants_{idx}_option_pack_size"]  = str(row["pack_size"]) if row["pack_size"] else ""
+                meta[f"_kit_variants_{idx}_option_pack_size"] = "field_kit_variant_pack_size"
                 meta[f"kit_variants_{idx}_variant_product"]  = str(row["wc_id"])
                 meta[f"_kit_variants_{idx}_variant_product"] = "field_kit_variant_product"
 
