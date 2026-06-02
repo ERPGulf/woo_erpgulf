@@ -1707,6 +1707,8 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 meta[f"_kit_variants_{idx}_option_pack_size"] = "field_kit_variant_pack_size"
                 meta[f"kit_variants_{idx}_variant_product"]  = str(row["wc_id"])
                 meta[f"_kit_variants_{idx}_variant_product"] = "field_kit_variant_product"
+                meta[f"kit_variants_{idx}_option_type"]  = type_ar.get(row["type"], row["type"])
+                meta[f"_kit_variants_{idx}_option_type"] = "field_kit_variant_type"
 
             # Push to kit parent product
             frappe.log_error("Kit Options: Pushing to parent", f"product_id={product_id}, meta={meta}")
