@@ -1,0 +1,186 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-06-13 23:09:43.336827",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "item_name",
+  "woocommerce_id",
+  "woo_name_arabic",
+  "woocommerce_server",
+  "sync_date",
+  "sync_time",
+  "duration_seconds",
+  "sync_trigger",
+  "status",
+  "skip_reason",
+  "price_at_sync",
+  "stock_at_sync",
+  "is_bundle",
+  "has_images",
+  "has_compatibility",
+  "total_api_calls",
+  "successful_pushes",
+  "failed_pushes",
+  "response_summary",
+  "failed_fields",
+  "error_detail",
+  "payload_summary",
+  "traceback"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "options": "Item"
+  },
+  {
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Item Name"
+  },
+  {
+   "fieldname": "woocommerce_id",
+   "fieldtype": "Data",
+   "label": "WooCommerce ID"
+  },
+  {
+   "fieldname": "woocommerce_server",
+   "fieldtype": "Data",
+   "label": "WooCommerce Server"
+  },
+  {
+   "fieldname": "sync_date",
+   "fieldtype": "Date",
+   "label": "Sync Date"
+  },
+  {
+   "fieldname": "sync_time",
+   "fieldtype": "Time",
+   "label": "Sync Time"
+  },
+  {
+   "fieldname": "duration_seconds",
+   "fieldtype": "Float",
+   "label": "Duration (seconds)"
+  },
+  {
+   "fieldname": "sync_trigger",
+   "fieldtype": "Data",
+   "label": "Sync Trigger"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Data",
+   "label": "Status"
+  },
+  {
+   "fieldname": "skip_reason",
+   "fieldtype": "Data",
+   "label": "Skip Reason"
+  },
+  {
+   "fieldname": "price_at_sync",
+   "fieldtype": "Currency",
+   "label": "Price at Sync"
+  },
+  {
+   "fieldname": "stock_at_sync",
+   "fieldtype": "Float",
+   "label": "Stock at Sync"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_bundle",
+   "fieldtype": "Check",
+   "label": "Is Bundle"
+  },
+  {
+   "default": "0",
+   "fieldname": "has_images",
+   "fieldtype": "Check",
+   "label": "Has Images"
+  },
+  {
+   "default": "0",
+   "fieldname": "has_compatibility",
+   "fieldtype": "Check",
+   "label": "Has Compatibility"
+  },
+  {
+   "fieldname": "total_api_calls",
+   "fieldtype": "Int",
+   "label": "Total API Calls"
+  },
+  {
+   "fieldname": "successful_pushes",
+   "fieldtype": "Int",
+   "label": "Successful Pushes"
+  },
+  {
+   "fieldname": "failed_pushes",
+   "fieldtype": "Int",
+   "label": "Failed Pushes"
+  },
+  {
+   "fieldname": "response_summary",
+   "fieldtype": "Text",
+   "label": "Response Summary"
+  },
+  {
+   "fieldname": "failed_fields",
+   "fieldtype": "Small Text",
+   "label": "Failed Fields"
+  },
+  {
+   "fieldname": "error_detail",
+   "fieldtype": "Text",
+   "label": "Error Detail"
+  },
+  {
+   "fieldname": "payload_summary",
+   "fieldtype": "Text",
+   "label": "Payload Summary"
+  },
+  {
+   "fieldname": "traceback",
+   "fieldtype": "Code",
+   "label": "Traceback"
+  },
+  {
+   "fieldname": "woo_name_arabic",
+   "fieldtype": "Data",
+   "label": "Woo Name Arabic"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-13 23:19:35.980901",
+ "modified_by": "Administrator",
+ "module": "WooCommerce",
+ "name": "Woo Sync Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

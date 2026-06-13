@@ -407,13 +407,88 @@ class SynchroniseItem(SynchroniseWooCommerce):
             resp.close()
             if status not in (200, 201):
                 frappe.log_error("Woo API error", f"HTTP {status} for product {product_id}")
-                return {}
-            return {"status": status}
+                return {"ok": False, "status": status, "product_id": product_id}
+            return {"ok": True, "status": status, "product_id": product_id}
         except Exception as e:
             frappe.log_error(f"Woo API exception: {e}")
-            return {}
-            
-        
+            return {"ok": False, "status": "exception", "error": str(e), "product_id": product_id}
+
+    def _tracked_push(self, product_id, field_label, meta=None, **fields):
+        result = self.push_wc_product(product_id, meta=meta, **fields)
+        result["field"] = field_label
+        if not hasattr(self, "_push_log"):
+            self._push_log = []
+        self._push_log.append(result)
+        return result
+
+    def log_sync_result(self, item_code, product_id, push_log, trigger="Manual", duration=0, traceback=""):
+        try:
+            from frappe.utils import nowdate, nowtime
+
+            failed = [r for r in push_log if not r.get("ok")]
+            success = [r for r in push_log if r.get("ok")]
+
+            if not push_log:
+                overall = "Failed"
+            elif not failed:
+                overall = "Success"
+            elif not success:
+                overall = "Failed"
+            else:
+                overall = "Partial"
+
+            item = frappe.get_doc("Item", item_code)
+
+            price_doc = frappe.get_all(
+                "Item Price",
+                filters={"item_code": item_code, "price_list": "Standard Selling"},
+                fields=["price_list_rate"], limit=1
+            )
+            price = price_doc[0].price_list_rate if price_doc else 0.0
+
+            bins = frappe.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
+            total_stock = sum(b.actual_qty for b in bins)
+
+            is_bundle = bool(frappe.db.exists("Product Bundle", {"new_item_code": item_code}))
+            compat_data, compat_count = self.build_compatibility_data(item_code)
+
+            summary_lines = []
+            for r in push_log:
+                icon = "✅" if r.get("ok") else "❌"
+                summary_lines.append(f"{icon} {r['field']}: HTTP {r.get('status', '?')}")
+
+            frappe.get_doc({
+                "doctype": "Woo Sync Log",
+                "item_code": item_code,
+                "item_name": item.item_name,
+                "woo_name_arabic": item.custom_woo_name__arabic or "",
+                "woocommerce_id": str(product_id),
+                "woocommerce_server": self.server_name or "",
+                "sync_date": nowdate(),
+                "sync_time": nowtime(),
+                "duration_seconds": round(duration, 2),
+                "sync_trigger": trigger,
+                "status": overall,
+                "price_at_sync": price,
+                "stock_at_sync": total_stock,
+                "is_bundle": is_bundle,
+                "has_images": 1 if item.custom_woo_image_url else 0,
+                "has_compatibility": 1 if compat_count > 0 else 0,
+                "total_api_calls": len(push_log),
+                "successful_pushes": len(success),
+                "failed_pushes": len(failed),
+                "response_summary": "\n".join(summary_lines),
+                "failed_fields": ", ".join([r["field"] for r in failed]) if failed else "",
+                "error_detail": "\n".join([
+                    f"{r['field']}: HTTP {r.get('status')} — {r.get('error', '')}"
+                    for r in failed
+                ]) if failed else "",
+                "traceback": traceback,
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+        except Exception as e:
+            frappe.log_error(f"Woo Sync Log write failed: {e}")
+
     def create_bundle_product(self, item, product_id=None):
 
         import requests
@@ -546,8 +621,11 @@ class SynchroniseItem(SynchroniseWooCommerce):
         server = wc_server[0]
         if not server.enable_sync:
             return
-        
-        
+
+        import time
+        self._push_log = []
+        self._sync_start = time.time()
+
         # frappe.log_error("351")
         wc_product_dirty = False
         is_bundle = frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code})		
@@ -611,7 +689,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             or wc_product.get("product_id")
         )
         frappe.log_error("product_id resolved", f"{product_id} from wc_product.name={wc_product.name}")
-        self.push_wc_product(product_id, sku=item.item.item_code)
+        self._tracked_push(product_id, "sku", sku=item.item.item_code)
         # frappe.log_error("item code",item.item.item_code)
 
         # push images
@@ -621,10 +699,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             if image_list:
                 main_image = {"src": image_list[0]}
                 gallery_images = [{"src": url} for url in image_list[1:]]
-                self.push_wc_product(
-                    product_id,
-                    images=[main_image] + gallery_images
-                )
+                self._tracked_push(product_id, "images", images=[main_image] + gallery_images)
         
         # push description
         # description_text = self.build_item_description(item.item.item_code)
@@ -633,21 +708,15 @@ class SynchroniseItem(SynchroniseWooCommerce):
         if description:
             description_text = self.strip_html(description)
         short_description=item.item.custom_woo__short_description
-        self.push_wc_product(
-            product_id,
-            description=description_text,
-            short_description=short_description,
-        )
+        self._tracked_push(product_id, "description", description=description_text, short_description=short_description)
         
 
         # Sync shipping class from ERPNext custom field
         shipping_class = item.item.custom_shipping_class or ""
         if shipping_class:
             try:
-                self.push_wc_product(
-                    product_id,
-                    shipping_class=shipping_class
-                )
+                self._tracked_push(product_id, "shipping_class", shipping_class=shipping_class)
+
                 # frappe.log_error(
                 #     "Shipping class synced",
                 #     f"Item: {item.item.item_name}, Shipping Class: {shipping_class}"
@@ -686,7 +755,8 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 "options": options                
             })
         if wc_attributes:
-            self.push_wc_product(product_id, attributes=wc_attributes)
+            self._tracked_push(product_id, "attributes", attributes=wc_attributes)
+
 
         # 🏷 Sync Branch-wise Stock dynamically (Normal + Bundle Support)
         try:
@@ -746,7 +816,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 meta_data[f"branch_stock_{index}_stock_qty"] = int(qty)
             meta_data["branch_stock"] = len(branch_entries)
             if meta_data:
-                self.push_wc_product(product_id, meta=meta_data)
+                self._tracked_push(product_id, "branch_stock", meta=meta_data)
             else:
                 frappe.log_error("No Branch Stock Found", item.item.item_code)
         except Exception as e:
@@ -803,13 +873,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             else:
                 stock_status = "onbackorder"  
                 backorders = "notify"         
-            self.push_wc_product(
-                product_id,
-                manage_stock=True,
-                stock_quantity=int(total_qty),
-                stock_status=stock_status,
-                backorders=backorders  
-            )
+            self._tracked_push(product_id, "stock", manage_stock=True, stock_quantity=int(total_qty), stock_status=stock_status, backorders=backorders)
 
             # frappe.log_error(
             #     "Stock synced",
@@ -922,11 +986,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                         #     Sale Price: {sale_price}
                         #     """
                         # )
-            self.push_wc_product(
-                product_id,
-                regular_price=str(round(original_price, 2)),
-                sale_price=str(round(sale_price, 2)),
-            )
+            self._tracked_push(product_id, "price", regular_price=str(round(original_price, 2)), sale_price=str(round(sale_price, 2)))
             # frappe.log_error(
             #     "Price Synced",
             #     f"Item: {item.item.item_code}, Regular: {original_price}, Sale: {sale_price}"
@@ -966,20 +1026,15 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
         # if compatibility_entries:
         #     is_spare_part = True
-        self.push_wc_product(
-            product_id,
-            meta={
-                "mark_spare_part": "1" if is_spare_part else "0"
-            }
+        self._tracked_push(product_id, "spare_part", meta={"mark_spare_part": "1" if is_spare_part else "0"})
 
-        )
         
         # ✅ Build compatibility data dynamically from ERPNext child table
         meta_data, count = self.build_compatibility_data(item.item.item_code)
         if count > 0:
             meta_data["add_compactable_details"] = str(count)
             meta_data["_add_compactable_details"] = "field_68e38a56a4d82"
-            self.push_wc_product(product_id, meta=meta_data)
+            self._tracked_push(product_id, "compatibility", meta=meta_data)
 
             # frappe.log_error("Compatibility Synced",
             #                 f"Item: {item.item.item_name}, Total Rows: {count}")
@@ -990,13 +1045,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         # ✅ Universal Product (ACF True/False)
         is_universal = "1" if count == 0 else "0"
         # frappe.log_error("is_universal",is_universal)
-        self.push_wc_product(
-            product_id,
-            meta={
-                "universal_product": is_universal,
-                "_universal_product": "field_69cf69755b698"
-            }
-        )
+        self._tracked_push(product_id, "universal_product", meta={"universal_product": is_universal, "_universal_product": "field_69cf69755b698"})
         
         # # --- Push product categories ---
         categories = []
@@ -1014,7 +1063,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         categories = [dict(t) for t in {tuple(d.items()) for d in categories}]
         if categories:
             try:
-                self.push_wc_product(product_id, categories=categories)
+                self._tracked_push(product_id, "categories", categories=categories)
                 # frappe.log_error(
                 #     "Categories Synced",
                 #     f"Item: {item.item.item_name}, Categories: {categories}"
@@ -1032,7 +1081,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             offer_id = self.get_or_create_wc_offer_category(offer_name)
             offer_categories.append(offer_id)
             
-        self.push_wc_product(product_id, offer_category=offer_categories)
+        self._tracked_push(product_id, "offer_category", offer_category=offer_categories)
             # frappe.log_error("offer category pushed",offer_categories)
         
         #  Sync "Bought Together" Items
@@ -1072,7 +1121,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                             wc_ids.append(str(wc_id))
 
                     if wc_ids:
-                        self.push_wc_product(product_id, bundle_product_items=wc_ids)
+                        self._tracked_push(product_id, "bought_together", bundle_product_items=wc_ids)
                         # frappe.log_error(
                         #     "✅ Bought Together Synced",
                         #     f"Item: {current_item_code}, Bundle Product Items: {wc_ids}"
@@ -1089,7 +1138,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
                 if random_items:
                     wc_ids = [str(i["woocommerce_id"]) for i in random_items if i.get("woocommerce_id")]
-                    self.push_wc_product(product_id, bundle_product_items=wc_ids)
+                    self._tracked_push(product_id, "bought_together_random", bundle_product_items=wc_ids)
                     # frappe.log_error(
                     #     " No invoices found — pushed random Bought Together items",
                     #     f"Item: {current_item_code}, Random Bundle Product Items: {wc_ids}"
@@ -1101,23 +1150,13 @@ class SynchroniseItem(SynchroniseWooCommerce):
             frappe.log_error("❌ Bought Together Sync Failed", str(e))
         
         # push description
-        self.push_wc_product(
-            product_id,
-            description=description_text,
-            short_description=short_description,
-        )
+        self._tracked_push(product_id, "description_final", description=description_text, short_description=short_description)
 
         # ✅ push manufacturer brand
         brand = item.item.brand or ""
         # frappe.log_error("brand",brand)
         if brand:
-            self.push_wc_product(
-                product_id,
-                meta={
-                    "manufacturer_brand": brand,
-                    "_manufacturer_brand": "field_69ce4ef9cd32d"
-                }
-            )
+            self._tracked_push(product_id, "brand", meta={"manufacturer_brand": brand, "_manufacturer_brand": "field_69ce4ef9cd32d"})
         # ✅ Rebuild woosb_ids for bundle products
         if frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code}):
             try:
@@ -1143,15 +1182,24 @@ class SynchroniseItem(SynchroniseWooCommerce):
                             "max": ""
                         }
                 if woosb_ids:
-                    self.push_wc_product(product_id, meta=[
-                        {"key": "woosb_ids", "value": woosb_ids}
-                    ])
+                    self._tracked_push(product_id, "woosb_ids", meta=[{"key": "woosb_ids", "value": woosb_ids}])
             except Exception as e:
                 frappe.log_error("woosb_ids rebuild failed", str(e))
 
         # ✅ Sync Kit Options (Position / Side / Type)
+        # ✅ Sync Kit Options (Position / Side / Type)
         if frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code}):
             self.sync_kit_options(item, product_id)
+
+        # ✅ Log sync result to Woo Sync Log
+        duration = time.time() - self._sync_start
+        self.log_sync_result(
+            item.item.item_code,
+            product_id,
+            self._push_log,
+            trigger=getattr(self, "_sync_trigger", "Manual"),
+            duration=duration
+        )
             
     import re
     def contains_arabic(self,text):
