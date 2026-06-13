@@ -400,16 +400,19 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 url,
                 auth=(WC_CONSUMER_KEY, WC_CONSUMER_SECRET),
                 json=payload,
-                timeout=30,
+                timeout=(15, 120),
+                stream=True,
             )
-            if resp.status_code not in (200, 201):
-                a=resp.text
-                frappe.log_error("Woo API error ",a)
+            status = resp.status_code
+            resp.close()
+            if status not in (200, 201):
+                frappe.log_error("Woo API error", f"HTTP {status} for product {product_id}")
                 return {}
-            return resp.json()
+            return {"status": status}
         except Exception as e:
             frappe.log_error(f"Woo API exception: {e}")
             return {}
+            
         
     def create_bundle_product(self, item, product_id=None):
 
