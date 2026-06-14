@@ -2305,3 +2305,111 @@ def verify_woo_match(log_name):
     frappe.db.commit()
 
     return {"overall": overall, "fields": results}
+
+@frappe.whitelist()
+def verify_item_woo_match(item_code):
+    # get woocommerce_id from item
+    iws = frappe.db.get_value(
+        "Item WooCommerce Server",
+        {"parent": item_code},
+        ["woocommerce_id", "woocommerce_server"],
+        as_dict=True
+    )
+    if not iws or not iws.woocommerce_id:
+        frappe.throw("No WooCommerce ID found for this item.")
+
+    # reuse verify_woo_match by finding or creating a temp log
+    # fetch directly
+    sync = SynchroniseItem()
+    resp = sync.wcapi.get(f"products/{iws.woocommerce_id}")
+    wc = resp.json()
+
+    item = frappe.get_doc("Item", item_code)
+
+    price_doc = frappe.get_all(
+        "Item Price",
+        filters={"item_code": item_code, "price_list": "Standard Selling"},
+        fields=["price_list_rate"], limit=1
+    )
+    erp_price = price_doc[0].price_list_rate if price_doc else 0.0
+
+    bins = frappe.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
+    erp_stock = int(sum(b.actual_qty for b in bins))
+
+    def get_wc_meta(key):
+        for m in wc.get("meta_data", []):
+            if m.get("key") == key:
+                return m.get("value")
+        return None
+
+    results = {}
+    wc_price = float(wc.get("regular_price") or 0)
+    wc_stock = int(wc.get("stock_quantity") or 0)
+    erp_name = (item.custom_woo_name__arabic or item.item_name or "").strip()
+    wc_arabic = wc.get("name", "").strip()
+    erp_arabic = (item.custom_woo_name__arabic or "").strip()
+    expected_status = "instock" if erp_stock > 0 else "onbackorder"
+
+    results["SKU"] = {
+        "match": wc.get("sku", "").strip() == item_code.strip(),
+        "erp": item_code,
+        "wc": wc.get("sku", "")
+    }
+    results["Price"] = {
+        "match": round(wc_price, 2) == round(float(erp_price), 2),
+        "erp": round(float(erp_price), 2),
+        "wc": round(wc_price, 2)
+    }
+    results["Stock Quantity"] = {
+        "match": wc_stock == erp_stock,
+        "erp": erp_stock,
+        "wc": wc_stock
+    }
+    results["Stock Status"] = {
+        "match": wc.get("stock_status") == expected_status,
+        "erp": expected_status,
+        "wc": wc.get("stock_status")
+    }
+    results["Product Name"] = {
+        "match": wc.get("name", "").strip() == erp_name,
+        "erp": erp_name,
+        "wc": wc.get("name", "").strip()
+    }
+    results["Arabic Name"] = {
+        "match": wc_arabic == erp_arabic,
+        "erp": erp_arabic,
+        "wc": wc_arabic
+    }
+    results["Images"] = {
+        "match": (len(wc.get("images", [])) > 0) == bool((item.custom_woo_image_url or "").strip()),
+        "erp": "Has image" if item.custom_woo_image_url else "No image",
+        "wc": "Has image" if wc.get("images") else "No image"
+    }
+
+    # Compatibility
+    sync2 = SynchroniseItem()
+    compat_data, compat_count = sync2.build_compatibility_data(item_code)
+    wc_compat_count_raw = get_wc_meta("add_compactable_details")
+    wc_compat_count = int(wc_compat_count_raw) if wc_compat_count_raw else 0
+    compat_match = (compat_count == wc_compat_count)
+
+    if compat_match and compat_count > 0:
+        for i in range(compat_count):
+            if not all([
+                (compat_data.get(f"add_compactable_details_{i}_brand", "") or "").strip() == (get_wc_meta(f"add_compactable_details_{i}_brand") or "").strip(),
+                (compat_data.get(f"add_compactable_details_{i}_model", "") or "").strip() == (get_wc_meta(f"add_compactable_details_{i}_model") or "").strip(),
+                (compat_data.get(f"add_compactable_details_{i}_years", "") or "").strip() == (get_wc_meta(f"add_compactable_details_{i}_years") or "").strip(),
+                (compat_data.get(f"add_compactable_details_{i}_variant", "") or "").strip() == (get_wc_meta(f"add_compactable_details_{i}_variant") or "").strip(),
+                (compat_data.get(f"add_compactable_details_{i}_engine_size", "") or "").strip() == (get_wc_meta(f"add_compactable_details_{i}_engine_size") or "").strip(),
+            ]):
+                compat_match = False
+                break
+
+    results["Compatibility"] = {
+        "match": compat_match,
+        "erp": f"{compat_count} rows",
+        "wc": f"{wc_compat_count} rows"
+    }
+
+    overall = all(v["match"] for v in results.values())
+    return {"overall": overall, "fields": results}
