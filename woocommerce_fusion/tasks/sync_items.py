@@ -650,13 +650,13 @@ class SynchroniseItem(SynchroniseWooCommerce):
         if not clean_name:
             clean_name = self.clean_product_name(raw_name)
         if wc_product.woocommerce_name != clean_name and not is_bundle:
-            wc_product.woocommerce_name = clean_name
+            wc_product.woocommerce_name = clean_name[:140]
             wc_product_dirty = True
         if is_bundle:
             bundle_name = frappe.db.get_value("Product Bundle", {"new_item_code": item.item.item_code}, "name")
             if bundle_name and wc_product.woocommerce_name !=bundle_name:
                 bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
-                wc_product.woocommerce_name = (bundle_doc.description or "").strip() or clean_name
+                wc_product.woocommerce_name = ((bundle_doc.description or "").strip() or clean_name)[:140]
                 wc_product_dirty = True
                 
         # short_slug = self.clean_slug(wc_product.woocommerce_name)
@@ -2142,7 +2142,7 @@ def verify_woo_match(log_name):
     frappe.db.set_value("Woo Sync Log", log_name, {
         "matching_confirmed": 1 if overall else 0,
         "last_verification": frappe.utils.now(),
-        "verification_result": "\n".join(lines),
+        "verification_results": "\n".join(lines),
     })
     frappe.db.commit()
 
