@@ -28,7 +28,10 @@
   "failed_fields",
   "error_detail",
   "payload_summary",
-  "traceback"
+  "traceback",
+  "matching_confirmed",
+  "last_verification",
+  "verification_results"
  ],
  "fields": [
   {
@@ -154,12 +157,28 @@
    "fieldname": "woo_name_arabic",
    "fieldtype": "Data",
    "label": "Woo Name Arabic"
+  },
+  {
+   "default": "0",
+   "fieldname": "matching_confirmed",
+   "fieldtype": "Check",
+   "label": "Matching Confirmed"
+  },
+  {
+   "fieldname": "last_verification",
+   "fieldtype": "Datetime",
+   "label": "Last Verification"
+  },
+  {
+   "fieldname": "verification_results",
+   "fieldtype": "Text",
+   "label": "Verification Results"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-13 23:19:35.980901",
+ "modified": "2026-06-14 10:04:10.565170",
  "modified_by": "Administrator",
  "module": "WooCommerce",
  "name": "Woo Sync Log",
