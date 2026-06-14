@@ -121,7 +121,18 @@ def run_item_sync(
             return (None, None)
         
         if not item.woocommerce_servers:
-            frappe.throw(_("No WooCommerce Servers defined for Item {0}").format(item_code))
+            frappe.get_doc({
+                "doctype": "Woo Sync Log",
+                "item_code": item.item_code,
+                "item_name": item.item_name,
+                "sync_date": frappe.utils.nowdate(),
+                "sync_time": frappe.utils.nowtime(),
+                "status": "Skipped",
+                "skip_reason": "No WooCommerce Server defined for this item",
+                "sync_trigger": "Bulk",
+            }).insert(ignore_permissions=True)
+            frappe.db.commit()
+            return (None, None)
         for wc_server in item.woocommerce_servers:
             sync = SynchroniseItem(
                 item=ERPNextItemToSync(item=item, item_woocommerce_server_idx=wc_server.idx)
@@ -414,7 +425,12 @@ class SynchroniseItem(SynchroniseWooCommerce):
             return {"ok": False, "status": "exception", "error": str(e), "product_id": product_id}
 
     def _tracked_push(self, product_id, field_label, meta=None, **fields):
-        result = self.push_wc_product(product_id, meta=meta, **fields)
+        try:
+            result = self.push_wc_product(product_id, meta=meta, **fields)
+            if not result:
+                result = {"ok": False, "status": "empty", "product_id": product_id}
+        except Exception as e:
+            result = {"ok": False, "status": "exception", "error": str(e), "product_id": product_id}
         result["field"] = field_label
         if not hasattr(self, "_push_log"):
             self._push_log = []
@@ -688,7 +704,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             or wc_product.get("id")
             or wc_product.get("product_id")
         )
-        frappe.log_error("product_id resolved", f"{product_id} from wc_product.name={wc_product.name}")
+        # frappe.log_error("product_id resolved", f"{product_id} from wc_product.name={wc_product.name}")
         self._tracked_push(product_id, "sku", sku=item.item.item_code)
         # frappe.log_error("item code",item.item.item_code)
 
@@ -822,43 +838,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         except Exception as e:
             frappe.log_error("Branch Stock Sync Failed", str(e))
 
-        # # 🏷 Sync Branch-wise Stock dynamically
-        # try:
-        #     bins = frappe.get_all(
-        #         "Bin",
-        #         filters={"item_code": item.item.item_code},
-        #         fields=["warehouse", "actual_qty"]
-        #     )
-        #     meta_data = {}
-        #     branch_entries = [b for b in bins if b.actual_qty > 0]
-
-        #     for index, b in enumerate(branch_entries):
-        #         branch_name = (
-        #             b.warehouse
-        #             .lower()                        
-        #             .replace("warehouse", "")       
-        #             .replace(" - ame", "")          
-        #             .strip()                        
-        #             .replace(" ", "-") + "-branch"  
-        #         )
-        #         meta_data[f"branch_stock_{index}_branch"] = branch_name
-        #         meta_data[f"branch_stock_{index}_stock_qty"] = int(b.actual_qty)
-
-        #     meta_data["branch_stock"] = len(branch_entries)
-
-        #     if meta_data:
-        #         self.push_wc_product(product_id, meta=meta_data)
-        #         # frappe.log_error(
-        #         #     "Branch Stock Synced",
-        #         #     f"Item: {item.item.item_code}, Meta: {meta_data}"
-        #         # )
-        #     else:
-        #         frappe.log_error("No Branch Stock Found", item.item.item_code)
-
-        # except Exception as e:
-        #     frappe.log_error("Branch Stock Sync Failed", str(e))
-
-        # 🏷 Sync Product Quantity / Stock 
+        
         try:
             bins = frappe.get_all(
                 "Bin",
@@ -1762,13 +1742,13 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 meta[f"_kit_variants_{idx}_option_type"] = "field_kit_variant_type"
 
             # Push to kit parent product
-            frappe.log_error("Kit Options: Pushing to parent", f"product_id={product_id}, meta={meta}")
+            # frappe.log_error("Kit Options: Pushing to parent", f"product_id={product_id}, meta={meta}")
             self.push_wc_product(product_id, meta=meta)
             # frappe.log_error("Kit Options Synced", f"Kit: {item.item.item_code}, Rows: {valid_rows}")
 
             # ── Push part_of_kit to each CHILD product ──
             for row in valid_rows:
-                frappe.log_error("Kit Options: Pushing to child", f"wc_id={row['wc_id']}, parent_id={product_id}")
+                # frappe.log_error("Kit Options: Pushing to child", f"wc_id={row['wc_id']}, parent_id={product_id}")
                 self.push_wc_product(
                     row["wc_id"],
                     meta={
@@ -1905,173 +1885,7 @@ def expand_years(text: str):
     results = sorted(set(results), key=int)
     return results
 
-# @frappe.whitelist()
-# def bulk_run_item_sync(items):
-#     if isinstance(items, str):
-#         import json
-#         items = json.loads(items)
 
-#     total_items = len(items)
-#     user = frappe.session.user
-
-#     frappe.enqueue(
-#         "woocommerce_fusion.tasks.sync_items.background_bulk_sync",
-#         items=items,
-#         total_items=total_items,
-#         user=user,
-#         queue="long",
-#         timeout=86400,
-#         job_name="bulk_wc_sync"
-        
-#     )
-#     return {
-#         "status": "queued",
-#         "message": f"Sync started for {total_items} item(s) in background."
-#     }
-# def background_bulk_sync(items, total_items,user):
-#     success, failed = [], []
-
-#     for idx, item_code in enumerate(items, start=1):
-#         try:
-#             run_item_sync(item_code=item_code, enqueue=False)
-#             success.append(item_code)
-#         except Exception:
-#             failed.append(item_code)
-
-#     message = f"""
-#     WooCommerce Sync Completed<br><br>
-#     ✅ Success: {len(success)} items<br>
-#     ❌ Failed: {len(failed)} items<br><br>
-#     """
-#     # frappe.log_error("WC Bulk Sync Summary", message)
-#     # Optional: send user notification
-#     frappe.publish_realtime(
-#         event="wc_bulk_sync_complete",
-#         message=message,
-#         user=user 
-#     )
-
-# CHUNK_SIZE = 10
-
-# @frappe.whitelist()
-# def bulk_run_item_sync(items):
-
-#     if isinstance(items, str):
-#         items = json.loads(items)
-
-#     total_items = len(items)
-#     chunks = [
-#         items[i:i + CHUNK_SIZE]
-#         for i in range(0, total_items, CHUNK_SIZE)
-#     ]
-
-#     for index, chunk in enumerate(chunks):
-#         frappe.enqueue(
-#             "woocommerce_fusion.tasks.sync_items.background_bulk_sync_chunk",
-#             items=chunk,
-#             chunk_index=index,
-#             user=frappe.session.user,
-#             queue="long",
-#             timeout=3600,
-#             job_name=f"wc_sync_chunk_{index}",
-#         )
-
-
-#     return {
-#         "status": "queued",
-#         "message": f"Bulk sync started",
-#         "total_items": total_items,
-#         "total_chunks": len(chunks),
-#     }
-    
-# def background_bulk_sync_chunk(items, chunk_index, user=None):
-
-#     frappe.set_user(user or "Administrator")
-
-#     success = []
-#     failed = []
-
-#     for item_code in items:
-#         try:
-#             # frappe.log_error(
-#             #     f"Starting sync for item {item_code} (chunk {chunk_index + 1})",
-#             #     ""
-#             # )
-#             run_item_sync(item_code=item_code, enqueue=False)
-#             success.append(item_code)
-
-#         except Exception:
-#             failed.append(item_code)
-
-
-# CHUNK_SIZE = 10
-
-# @frappe.whitelist()
-# def bulk_run_item_sync(items):
-
-#     if isinstance(items, str):
-#         import json
-#         items = json.loads(items)
-
-#     total_items = len(items)
-#     user = frappe.session.user
-
-#     chunks = [
-#         items[i:i + CHUNK_SIZE]
-#         for i in range(0, total_items, CHUNK_SIZE)
-#     ]
-
-#     total_chunks = len(chunks)
-#     frappe.cache().set_value(
-#         f"wc_bulk_sync_{user}",
-#         {
-#             "total_chunks": total_chunks,
-#             "completed_chunks": 0,
-#         }
-#     )
-#     for index, chunk in enumerate(chunks):
-#         frappe.enqueue(
-#             "woocommerce_fusion.tasks.sync_items.background_bulk_sync_chunk",
-#             items=chunk,
-#             chunk_index=index,
-#             user=user,
-#             queue="long",
-#             timeout=3600,
-#             job_name=f"wc_sync_chunk_{index}",
-#         )
-
-#     return {
-#         "status": "queued",
-#         "message": f"Sync started for {total_items} item(s) in background."
-#     }
-    
-# def background_bulk_sync_chunk(items, chunk_index, user=None):
-
-#     frappe.set_user(user or "Administrator")
-
-#     for item_code in items:
-#         try:
-#             run_item_sync(item_code=item_code, enqueue=False)
-#         except Exception:
-#             pass
-#     cache_key = f"wc_bulk_sync_{user}"
-#     progress = frappe.cache().get_value(cache_key)
-
-#     if progress:
-#         progress["completed_chunks"] += 1
-#         frappe.cache().set_value(cache_key, progress)
-#         if progress["completed_chunks"] == progress["total_chunks"]:
-#             frappe.log_error(
-#                 "WooCommerce Bulk Sync Completed",
-#                 f"All {progress['total_chunks']} chunks processed successfully."
-#             )
-#             frappe.publish_realtime(
-#                 event="wc_bulk_sync_complete",
-#                 # message="WooCommerce Sync Completed",
-#                 message={"status": "done"},
-#                 user=user
-#             )
-#             frappe.cache().delete_value(cache_key)
 
 CHUNK_SIZE = 10
 
@@ -2096,7 +1910,14 @@ def bulk_run_item_sync(items):
             "chunks": chunks,
             "total_chunks": len(chunks),
             "completed_chunks": 0,
+            "total_items": total_items,
+            "synced_items": 0,
         }
+    )
+
+    frappe.log_error(
+        "Bulk Sync Started",
+        f"Started bulk sync with {total_items} items in {len(chunks)} chunks — triggered by {user}"
     )
 
     # enqueue only first chunk
@@ -2161,28 +1982,49 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
 
     frappe.set_user(user or "Administrator")
 
+    synced_in_chunk = 0
     for item_code in items:
         try:
             run_item_sync(item_code=item_code, enqueue=False)
+            synced_in_chunk += 1
         except Exception:
             frappe.log_error(frappe.get_traceback(), "WooCommerce Sync Error")
 
-    cache_key = f"wc_bulk_sync_{user}"
-    progress = frappe.cache().get_value(cache_key)
+    # always update progress regardless of errors
+    try:
+        cache_key = f"wc_bulk_sync_{user}"
+        progress = frappe.cache().get_value(cache_key)
 
-    if progress:
-        progress["completed_chunks"] += 1
-        frappe.cache().set_value(cache_key, progress)
+        if progress:
+            progress["completed_chunks"] += 1
+            progress["synced_items"] = progress.get("synced_items", 0) + synced_in_chunk
+            frappe.cache().set_value(cache_key, progress)
 
-        if progress["completed_chunks"] == progress["total_chunks"]:
-            frappe.publish_realtime(
-                event="wc_bulk_sync_complete",
-                message={"status": "done"},
-                user=user
-            )
-            frappe.cache().delete_value(cache_key)
+            total_items = progress.get("total_items", "?")
+            synced_so_far = progress.get("synced_items", synced_in_chunk)
+
+            if progress["completed_chunks"] == progress["total_chunks"]:
+                frappe.log_error(
+                    "Bulk Sync Finished",
+                    f"Finished bulk sync — successfully processed all {total_items} items"
+                )
+                frappe.publish_realtime(
+                    event="wc_bulk_sync_complete",
+                    message={"status": "done"},
+                    user=user
+                )
+                frappe.cache().delete_value(cache_key)
+            else:
+                enqueue_next_chunk(user)
         else:
-            enqueue_next_chunk(user)
+            frappe.log_error(
+                "Bulk Sync Stopped Midway",
+                f"Stopped bulk sync midway after chunk {chunk_index} — cache lost (Redis timeout?). "
+                f"Items in this chunk: {len(items)}, chunk synced: {synced_in_chunk}"
+            )
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Bulk sync progress update failed")
+
 
 
 @frappe.whitelist()
@@ -2300,135 +2142,13 @@ def verify_woo_match(log_name):
     frappe.db.set_value("Woo Sync Log", log_name, {
         "matching_confirmed": 1 if overall else 0,
         "last_verification": frappe.utils.now(),
-        "verification_results": "\n".join(lines),
+        "verification_result": "\n".join(lines),
     })
     frappe.db.commit()
 
     return {"overall": overall, "fields": results}
 
-@frappe.whitelist()
-def verify_item_woo_match(item_code):
-    # get woocommerce_id from item
-    iws = frappe.db.get_value(
-        "Item WooCommerce Server",
-        {"parent": item_code},
-        ["woocommerce_id", "woocommerce_server"],
-        as_dict=True
-    )
-    if not iws or not iws.woocommerce_id:
-        frappe.throw("No WooCommerce ID found for this item.")
 
-    # reuse verify_woo_match by finding or creating a temp log
-    # fetch directly
-    sync = SynchroniseItem()
-    resp = sync.wcapi.get(f"products/{iws.woocommerce_id}")
-    wc = resp.json()
-
-    item = frappe.get_doc("Item", item_code)
-
-    price_doc = frappe.get_all(
-        "Item Price",
-        filters={"item_code": item_code, "price_list": "Standard Selling"},
-        fields=["price_list_rate"], limit=1
-    )
-    erp_price = price_doc[0].price_list_rate if price_doc else 0.0
-
-    bins = frappe.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
-    erp_stock = int(sum(b.actual_qty for b in bins))
-
-    def get_wc_meta(key):
-        for m in wc.get("meta_data", []):
-            if m.get("key") == key:
-                return m.get("value")
-        return None
-
-    results = {}
-    wc_price = float(wc.get("regular_price") or 0)
-    wc_stock = int(wc.get("stock_quantity") or 0)
-    erp_name = (item.custom_woo_name__arabic or item.item_name or "").strip()
-    wc_arabic = wc.get("name", "").strip()
-    erp_arabic = (item.custom_woo_name__arabic or "").strip()
-    expected_status = "instock" if erp_stock > 0 else "onbackorder"
-
-    results["SKU"] = {
-        "match": wc.get("sku", "").strip() == item_code.strip(),
-        "erp": item_code,
-        "wc": wc.get("sku", "")
-    }
-    results["Price"] = {
-        "match": round(wc_price, 2) == round(float(erp_price), 2),
-        "erp": round(float(erp_price), 2),
-        "wc": round(wc_price, 2)
-    }
-    results["Stock Quantity"] = {
-        "match": wc_stock == erp_stock,
-        "erp": erp_stock,
-        "wc": wc_stock
-    }
-    results["Stock Status"] = {
-        "match": wc.get("stock_status") == expected_status,
-        "erp": expected_status,
-        "wc": wc.get("stock_status")
-    }
-    results["Product Name"] = {
-        "match": wc.get("name", "").strip() == erp_name,
-        "erp": erp_name,
-        "wc": wc.get("name", "").strip()
-    }
-    results["Arabic Name"] = {
-        "match": wc_arabic == erp_arabic,
-        "erp": erp_arabic,
-        "wc": wc_arabic
-    }
-    results["Images"] = {
-        "match": (len(wc.get("images", [])) > 0) == bool((item.custom_woo_image_url or "").strip()),
-        "erp": "Has image" if item.custom_woo_image_url else "No image",
-        "wc": "Has image" if wc.get("images") else "No image"
-    }
-
-    # Compatibility
-    sync2 = SynchroniseItem()
-    compat_data, compat_count = sync2.build_compatibility_data(item_code)
-    wc_compat_count_raw = get_wc_meta("add_compactable_details")
-    wc_compat_count = int(wc_compat_count_raw) if wc_compat_count_raw else 0
-    compat_match = (compat_count == wc_compat_count)
-
-    if compat_match and compat_count > 0:
-        for i in range(compat_count):
-            if not all([
-                (compat_data.get(f"add_compactable_details_{i}_brand", "") or "").strip() == (get_wc_meta(f"add_compactable_details_{i}_brand") or "").strip(),
-                (compat_data.get(f"add_compactable_details_{i}_model", "") or "").strip() == (get_wc_meta(f"add_compactable_details_{i}_model") or "").strip(),
-                (compat_data.get(f"add_compactable_details_{i}_years", "") or "").strip() == (get_wc_meta(f"add_compactable_details_{i}_years") or "").strip(),
-                (compat_data.get(f"add_compactable_details_{i}_variant", "") or "").strip() == (get_wc_meta(f"add_compactable_details_{i}_variant") or "").strip(),
-                (compat_data.get(f"add_compactable_details_{i}_engine_size", "") or "").strip() == (get_wc_meta(f"add_compactable_details_{i}_engine_size") or "").strip(),
-            ]):
-                compat_match = False
-                break
-
-    results["Compatibility"] = {
-        "match": compat_match,
-        "erp": f"{compat_count} rows",
-        "wc": f"{wc_compat_count} rows"
-    }
-
-    overall = all(v["match"] for v in results.values())
-
-    # overall ignoring stock
-    overall_ignore_stock = all(
-        v["match"] for k, v in results.items()
-        if k not in ("Stock Quantity", "Stock Status")
-    )
-    stock_mismatch = (
-        not results.get("Stock Quantity", {}).get("match", True) or
-        not results.get("Stock Status", {}).get("match", True)
-    )
-
-    return {
-        "overall": overall,
-        "overall_ignore_stock": overall_ignore_stock,
-        "stock_mismatch": stock_mismatch,
-        "fields": results
-    }
 
 @frappe.whitelist()
 def verify_item_woo_match(item_code):
@@ -2439,7 +2159,18 @@ def verify_item_woo_match(item_code):
         as_dict=True
     )
     if not iws or not iws.woocommerce_id:
-        frappe.throw("No WooCommerce ID found for this item.")
+        frappe.get_doc({
+            "doctype": "Woo Sync Log",
+            "item_code": item_code,
+            "item_name": frappe.db.get_value("Item", item_code, "item_name"),
+            "sync_date": frappe.utils.nowdate(),
+            "sync_time": frappe.utils.nowtime(),
+            "status": "Skipped",
+            "skip_reason": "No WooCommerce ID found for this item",
+            "sync_trigger": "Verify",
+        }).insert(ignore_permissions=True)
+        frappe.db.commit()
+        return {}
 
     sync = SynchroniseItem()
     resp = sync.wcapi.get(f"products/{iws.woocommerce_id}")
@@ -2527,7 +2258,20 @@ def verify_item_woo_match(item_code):
     }
 
     overall = all(v["match"] for v in results.values())
-    return {"overall": overall, "fields": results}
+    overall_ignore_stock = all(
+        v["match"] for k, v in results.items()
+        if k not in ("Stock Quantity", "Stock Status")
+    )
+    stock_mismatch = (
+        not results.get("Stock Quantity", {}).get("match", True) or
+        not results.get("Stock Status", {}).get("match", True)
+    )
+    return {
+        "overall": overall,
+        "overall_ignore_stock": overall_ignore_stock,
+        "stock_mismatch": stock_mismatch,
+        "fields": results
+    }
 
 
 @frappe.whitelist()
