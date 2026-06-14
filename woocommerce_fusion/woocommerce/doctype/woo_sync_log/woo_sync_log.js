@@ -1,5 +1,35 @@
 frappe.ui.form.on("Woo Sync Log", {
     refresh(frm) {
+
+        // Sync to WooCommerce
+        frm.add_custom_button(__("🔄 Sync to WooCommerce"), function () {
+            frappe.confirm(
+                `Sync ${frm.doc.item_code} with WooCommerce?`,
+                function () {
+                    frappe.call({
+                        method: "woocommerce_fusion.tasks.sync_items.run_item_sync",
+                        args: { item_code: frm.doc.item_code },
+                        freeze: true,
+                        freeze_message: __("Syncing with WooCommerce..."),
+                        callback: function (r) {
+                            frappe.show_alert({
+                                message: __("Sync completed successfully"),
+                                indicator: "green"
+                            }, 5);
+                            frm.reload_doc();
+                        },
+                        error: () => {
+                            frappe.show_alert({
+                                message: __("Sync failed. See Error Log."),
+                                indicator: "red"
+                            }, 5);
+                        }
+                    });
+                }
+            );
+        });
+
+        // Verify Live in WooCommerce
         frm.add_custom_button("🔍 Verify Live in WooCommerce", function () {
             frappe.call({
                 method: "woocommerce_fusion.tasks.sync_items.verify_woo_match",
