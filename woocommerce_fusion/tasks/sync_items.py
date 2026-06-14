@@ -2235,7 +2235,7 @@ def verify_woo_match(log_name):
     results["Product Name"] = {"match": wc.get("name", "").strip() == erp_name}
 
     # Arabic Name from WC meta
-    wc_arabic = (get_wc_meta("woo_name_arabic") or "").strip()
+    wc_arabic = wc.get("name", "").strip()
     erp_arabic = (item.custom_woo_name__arabic or "").strip()
     results["Arabic Name"] = {"match": wc_arabic == erp_arabic}
 
