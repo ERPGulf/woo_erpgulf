@@ -12,6 +12,7 @@
   "verification_time",
   "overall_status",
   "verified",
+  "stock_mismatch",
   "result"
  ],
  "fields": [
@@ -61,12 +62,18 @@
    "fieldname": "result",
    "fieldtype": "Long Text",
    "label": "Result"
+  },
+  {
+   "default": "0",
+   "fieldname": "stock_mismatch",
+   "fieldtype": "Check",
+   "label": "Stock Mismatch"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-14 12:33:34.967867",
+ "modified": "2026-06-14 12:42:45.659204",
  "modified_by": "Administrator",
  "module": "WooCommerce",
  "name": "Woo Verification Log",

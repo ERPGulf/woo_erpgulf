@@ -2412,7 +2412,23 @@ def verify_item_woo_match(item_code):
     }
 
     overall = all(v["match"] for v in results.values())
-    return {"overall": overall, "fields": results}
+
+    # overall ignoring stock
+    overall_ignore_stock = all(
+        v["match"] for k, v in results.items()
+        if k not in ("Stock Quantity", "Stock Status")
+    )
+    stock_mismatch = (
+        not results.get("Stock Quantity", {}).get("match", True) or
+        not results.get("Stock Status", {}).get("match", True)
+    )
+
+    return {
+        "overall": overall,
+        "overall_ignore_stock": overall_ignore_stock,
+        "stock_mismatch": stock_mismatch,
+        "fields": results
+    }
 
 @frappe.whitelist()
 def verify_item_woo_match(item_code):
@@ -2548,8 +2564,9 @@ def verify_item_woo_match_and_log(item_code):
         "woocommerce_id": iws or "",
         "verification_date": frappe.utils.nowdate(),
         "verification_time": frappe.utils.nowtime(),
-        "overall_status": "✅ Match" if overall else "❌ Mismatch",
-        "verified": 1 if overall else 0,
+        "overall_status": "✅ Match" if overall else ("⚠️ Stock Only" if result.get("overall_ignore_stock") else "❌ Mismatch"),
+        "verified": 1 if result.get("overall_ignore_stock") else 0,
+        "stock_mismatch": 1 if result.get("stock_mismatch") else 0,
         "result": "\n".join(lines),
     }).insert(ignore_permissions=True)
     frappe.db.commit()
