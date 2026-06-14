@@ -5,33 +5,17 @@ app_description = "WooCommerce connector for ERPNext v14+"
 app_email = "dirk@finfoot.work"
 app_license = "GNU GPLv3"
 
-# Includes in <head>
-# ------------------
 
-# include js, css files in header of desk.html
-# app_include_css = "/assets/woocommerce_fusion/css/woocommerce_fusion.css"
-# app_include_js = "/assets/woocommerce_fusion/js/woocommerce_fusion.js"
-
-# include js, css files in header of web template
-# web_include_css = "/assets/woocommerce_fusion/css/woocommerce_fusion.css"
-# web_include_js = "/assets/woocommerce_fusion/js/woocommerce_fusion.js"
-
-# include custom scss in every website theme (without file extension ".scss")
-# website_theme_scss = "woocommerce_fusion/public/scss/website"
-
-# include js, css files in header of web form
-# webform_include_js = {"doctype": "public/js/doctype.js"}
-# webform_include_css = {"doctype": "public/css/doctype.css"}
-
-# include js in page
-# page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
 doctype_js = {"Sales Order": "public/js/selling/sales_order.js", 
               "Item": "public/js/stock/item.js",
               "Woocommerce Customer": "woocommerce/doctype/woocommerce_customer/woocommerce_customer.js"
             }
-doctype_list_js = {"Sales Order": "public/js/selling/sales_order_list.js"}
+doctype_list_js = {
+    "Sales Order": "public/js/selling/sales_order_list.js",
+    "Item": "public/js/stock/item_list.js",
+}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
