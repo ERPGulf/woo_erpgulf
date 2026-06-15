@@ -679,9 +679,15 @@ class SynchroniseItem(SynchroniseWooCommerce):
             
         if wc_product_dirty:
             try:
+                # ✅ Truncate name to 140 chars before saving
+                if wc_product.woocommerce_name:
+                    wc_product.woocommerce_name = wc_product.woocommerce_name[:140]
+                if wc_product.slug:
+                    wc_product.slug = wc_product.slug[:140]
                 # ✅ Only save if name has valid domain::id format
                 if wc_product.name and ('::' in str(wc_product.name) or '~' in str(wc_product.name)):
                     wc_product.save()
+                    
                 else:
                     frappe.log_error(
                         "wc_product.save() skipped",
