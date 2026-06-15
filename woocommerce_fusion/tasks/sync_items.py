@@ -1897,7 +1897,8 @@ def bulk_run_item_sync(items):
             "completed_chunks": 0,
             "total_items": total_items,
             "synced_items": 0,
-        })
+        }),
+        parent="__default"
     )
     frappe.db.commit()
 
@@ -1917,7 +1918,7 @@ def bulk_run_item_sync(items):
 def enqueue_next_chunk(user):
 
     cache_key = f"wc_bulk_sync_{user}"
-    raw = frappe.db.get_default(cache_key)
+    raw = frappe.db.get_default(cache_key, parent="__default")
     progress = frappe.parse_json(raw) if raw else None
 
     if not progress:
@@ -1981,13 +1982,13 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
     # always update progress regardless of errors
     try:
         cache_key = f"wc_bulk_sync_{user}"
-        raw = frappe.db.get_default(cache_key)
+        raw = frappe.db.get_default(cache_key, parent="__default")
         progress = frappe.parse_json(raw) if raw else None
 
         if progress:
             progress["completed_chunks"] += 1
             progress["synced_items"] = progress.get("synced_items", 0) + synced_in_chunk
-            frappe.db.set_default(cache_key, frappe.as_json(progress))
+            frappe.db.set_default(cache_key, frappe.as_json(progress), parent="__default")
             frappe.db.commit()
 
             total_items = progress.get("total_items", "?")
@@ -2003,7 +2004,7 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
                     message={"status": "done"},
                     user=user
                 )
-                frappe.db.delete_default(cache_key)
+                frappe.db.delete_default(cache_key, parent="__default")
                 frappe.db.commit()
             else:
                 enqueue_next_chunk(user)
