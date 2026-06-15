@@ -1981,6 +1981,14 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
     # always update progress regardless of errors
     try:
         cache_key = f"wc_bulk_sync_{user}"
+
+        # Debug: log what keys exist in Redis
+        all_keys = frappe.cache().get_keys("wc_bulk_sync*")
+        frappe.log_error(
+            "Bulk Sync Cache Debug",
+            f"Looking for key: {cache_key}\nSite: {frappe.local.site}\nAll wc_bulk_sync keys: {all_keys}"
+        )
+
         progress = frappe.cache().get_value(cache_key)
 
         if progress:
