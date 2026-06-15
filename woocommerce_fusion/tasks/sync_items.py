@@ -1963,8 +1963,8 @@ def enqueue_next_chunk(user):
         chunk_index=completed,
         user=user,
         queue="long",
-        timeout=18000,  # 5 hours per chunk
-        job_name=f"wc_sync_chunk_{completed}",
+        timeout=18000,
+        job_name=f"wc_sync_chunk_{completed}_{frappe.generate_hash(length=8)}",
     )
 def background_bulk_sync_chunk(items, chunk_index, user=None):
 
