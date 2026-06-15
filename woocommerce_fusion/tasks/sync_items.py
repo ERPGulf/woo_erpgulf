@@ -1912,8 +1912,10 @@ def bulk_run_item_sync(items):
             "completed_chunks": 0,
             "total_items": total_items,
             "synced_items": 0,
-        }
+        },
+        expires_in_sec=2592000
     )
+
 
     frappe.log_error(
         "Bulk Sync Started",
@@ -1975,7 +1977,7 @@ def enqueue_next_chunk(user):
         chunk_index=completed,
         user=user,
         queue="long",
-        timeout=3600,
+        timeout=18000,  # 5 hours per chunk
         job_name=f"wc_sync_chunk_{completed}",
     )
 def background_bulk_sync_chunk(items, chunk_index, user=None):
@@ -1998,7 +2000,7 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
         if progress:
             progress["completed_chunks"] += 1
             progress["synced_items"] = progress.get("synced_items", 0) + synced_in_chunk
-            frappe.cache().set_value(cache_key, progress)
+            frappe.cache().set_value(cache_key, progress, expires_in_sec=2592000)
 
             total_items = progress.get("total_items", "?")
             synced_so_far = progress.get("synced_items", synced_in_chunk)
