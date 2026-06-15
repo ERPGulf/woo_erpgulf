@@ -1889,9 +1889,10 @@ def bulk_run_item_sync(items):
         for i in range(0, total_items, CHUNK_SIZE)
     ]
 
+    import json as _json
     frappe.db.set_default(
         f"wc_bulk_sync_{user}",
-        frappe.as_json({
+        _json.dumps({
             "chunks": chunks,
             "total_chunks": len(chunks),
             "completed_chunks": 0,
@@ -1918,8 +1919,11 @@ def bulk_run_item_sync(items):
 def enqueue_next_chunk(user):
 
     cache_key = f"wc_bulk_sync_{user}"
+    import json as _json
+    frappe.db.close()
+    frappe.db.connect()
     raw = frappe.db.get_default(cache_key, parent="__default")
-    progress = frappe.parse_json(raw) if raw else None
+    progress = _json.loads(raw) if raw and raw.strip() else None
 
     if not progress:
         return
@@ -1981,14 +1985,18 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
 
     # always update progress regardless of errors
     try:
+        import json as _json
         cache_key = f"wc_bulk_sync_{user}"
+        frappe.db.close()
+        frappe.db.connect()
         raw = frappe.db.get_default(cache_key, parent="__default")
-        progress = frappe.parse_json(raw) if raw else None
+        progress = _json.loads(raw) if raw and raw.strip() else None
 
         if progress:
             progress["completed_chunks"] += 1
             progress["synced_items"] = progress.get("synced_items", 0) + synced_in_chunk
-            frappe.db.set_default(cache_key, frappe.as_json(progress), parent="__default")
+            frappe.db.set_default(cache_key, _json.dumps(progress), parent="__default")
+            
             frappe.db.commit()
 
             total_items = progress.get("total_items", "?")
