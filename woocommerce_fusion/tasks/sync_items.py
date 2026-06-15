@@ -561,7 +561,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             wc_product = frappe.get_doc({
                 "doctype": "WooCommerce Product",
                 "type": "woosb",
-                "woocommerce_name": (bundle_doc.description or "").strip() or clean_name,
+                "woocommerce_name": ((bundle_doc.description or "").strip() or clean_name)[:140],
                 "woocommerce_server": item.item_woocommerce_server.woocommerce_server,
                 # "woocommerce_id": wc_product_id,
                 "regular_price": item.item.standard_rate or 0,
@@ -677,32 +677,6 @@ class SynchroniseItem(SynchroniseWooCommerce):
             wc_product_dirty = True
             
             
-        if wc_product_dirty:
-            try:
-                # ✅ Truncate name to 140 chars before saving
-                if wc_product.woocommerce_name:
-                    wc_product.woocommerce_name = wc_product.woocommerce_name[:140]
-                if wc_product.slug:
-                    wc_product.slug = wc_product.slug[:140]
-                # ✅ Only save if name has valid domain::id format
-                if wc_product.name and ('::' in str(wc_product.name) or '~' in str(wc_product.name)):
-                    wc_product.save()
-                    
-                else:
-                    frappe.log_error(
-                        "wc_product.save() skipped",
-                        f"Invalid name format: {wc_product.name} — will push via API directly"
-                    )
-            except Exception as e:
-                frappe.log_error(
-                    title="wc_product.save() failed",
-                    message=frappe.get_traceback()
-                )
-                # ✅ Don't return — continue with push_wc_product below
-
-
-
-        # product_id = wc_product.id
         product_id = (
             getattr(wc_product, "woocommerce_id", None)
             or getattr(wc_product, "id", None)
@@ -710,8 +684,13 @@ class SynchroniseItem(SynchroniseWooCommerce):
             or wc_product.get("id")
             or wc_product.get("product_id")
         )
-        # frappe.log_error("product_id resolved", f"{product_id} from wc_product.name={wc_product.name}")
+
+        # Push name and slug via API directly — no wc_product.save() needed
+        name_to_push = (wc_product.woocommerce_name or clean_name or "")[:140]
+        slug_to_push = (wc_product.slug or self.clean_slug(name_to_push))[:140]
+        self._tracked_push(product_id, "name_slug", name=name_to_push, slug=slug_to_push)
         self._tracked_push(product_id, "sku", sku=item.item.item_code)
+
         # frappe.log_error("item code",item.item.item_code)
 
         # push images
@@ -1428,7 +1407,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         if not clean_name:
             clean_name = self.clean_product_name(raw_name)
         if wc_product.woocommerce_name != clean_name:
-            wc_product.woocommerce_name = clean_name
+            wc_product.woocommerce_name = clean_name[:140]
         wc_product.woocommerce_server = item.item_woocommerce_server.woocommerce_server
         wc_product.regular_price = get_item_price_rate(item) or "0"
         try:
@@ -1959,6 +1938,7 @@ def enqueue_next_chunk(user):
             filters={
                 "job_name": ["like", "wc_sync_chunk_%"],
                 "status": ["in", ["queued", "started"]],
+                "creation": [">", frappe.utils.add_to_date(None, minutes=-30)],
             },
             fields=["name", "job_name", "status", "creation", "queue"],
         )
