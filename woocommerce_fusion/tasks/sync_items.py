@@ -1996,7 +1996,7 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
             progress["completed_chunks"] += 1
             progress["synced_items"] = progress.get("synced_items", 0) + synced_in_chunk
             frappe.db.set_default(cache_key, _json.dumps(progress), parent="__default")
-            
+
             frappe.db.commit()
 
             total_items = progress.get("total_items", "?")
@@ -2012,7 +2012,8 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
                     message={"status": "done"},
                     user=user
                 )
-                frappe.db.delete_default(cache_key, parent="__default")
+                # Clear the progress key
+                frappe.db.set_default(cache_key, "", parent="__default")
                 frappe.db.commit()
             else:
                 enqueue_next_chunk(user)
