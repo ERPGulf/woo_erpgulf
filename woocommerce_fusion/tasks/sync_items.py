@@ -1889,18 +1889,17 @@ def bulk_run_item_sync(items):
         for i in range(0, total_items, CHUNK_SIZE)
     ]
 
-    frappe.cache().set_value(
+    frappe.db.set_default(
         f"wc_bulk_sync_{user}",
-        {
+        frappe.as_json({
             "chunks": chunks,
             "total_chunks": len(chunks),
             "completed_chunks": 0,
             "total_items": total_items,
             "synced_items": 0,
-        },
-        expires_in_sec=2592000
+        })
     )
-
+    frappe.db.commit()
 
     frappe.log_error(
         "Bulk Sync Started",
@@ -1918,7 +1917,8 @@ def bulk_run_item_sync(items):
 def enqueue_next_chunk(user):
 
     cache_key = f"wc_bulk_sync_{user}"
-    progress = frappe.cache().get_value(cache_key)
+    raw = frappe.db.get_default(cache_key)
+    progress = frappe.parse_json(raw) if raw else None
 
     if not progress:
         return
@@ -1981,20 +1981,14 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
     # always update progress regardless of errors
     try:
         cache_key = f"wc_bulk_sync_{user}"
-
-        # Debug: log what keys exist in Redis
-        all_keys = frappe.cache().get_keys("wc_bulk_sync*")
-        frappe.log_error(
-            "Bulk Sync Cache Debug",
-            f"Looking for key: {cache_key}\nSite: {frappe.local.site}\nAll wc_bulk_sync keys: {all_keys}"
-        )
-
-        progress = frappe.cache().get_value(cache_key)
+        raw = frappe.db.get_default(cache_key)
+        progress = frappe.parse_json(raw) if raw else None
 
         if progress:
             progress["completed_chunks"] += 1
             progress["synced_items"] = progress.get("synced_items", 0) + synced_in_chunk
-            frappe.cache().set_value(cache_key, progress, expires_in_sec=2592000)
+            frappe.db.set_default(cache_key, frappe.as_json(progress))
+            frappe.db.commit()
 
             total_items = progress.get("total_items", "?")
             synced_so_far = progress.get("synced_items", synced_in_chunk)
@@ -2009,13 +2003,14 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
                     message={"status": "done"},
                     user=user
                 )
-                frappe.cache().delete_value(cache_key)
+                frappe.db.delete_default(cache_key)
+                frappe.db.commit()
             else:
                 enqueue_next_chunk(user)
         else:
             frappe.log_error(
                 "Bulk Sync Stopped Midway",
-                f"Stopped bulk sync midway after chunk {chunk_index} — cache lost (Redis timeout?). "
+                f"Stopped bulk sync midway after chunk {chunk_index} — cache lost. "
                 f"Items in this chunk: {len(items)}, chunk synced: {synced_in_chunk}"
             )
     except Exception:
