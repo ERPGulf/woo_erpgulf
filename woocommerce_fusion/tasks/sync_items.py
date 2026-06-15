@@ -1987,8 +1987,6 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
     try:
         import json as _json
         cache_key = f"wc_bulk_sync_{user}"
-        frappe.db.close()
-        frappe.db.connect()
         raw = frappe.db.get_default(cache_key, parent="__default")
         progress = _json.loads(raw) if raw and raw.strip() else None
 
