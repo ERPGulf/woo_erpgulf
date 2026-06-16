@@ -1872,8 +1872,8 @@ def expand_years(text: str):
     return results
 
 
-
 CHUNK_SIZE = 10
+_current_batch_id = ""
 
 @frappe.whitelist()
 def bulk_run_item_sync(items):
@@ -1985,7 +1985,8 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
 
     frappe.set_user(user or "Administrator")
 
-    frappe.local.wc_batch_id = batch_id or ""
+    global _current_batch_id
+    _current_batch_id = batch_id or ""
 
     synced_in_chunk = 0
     for item_code in items:
