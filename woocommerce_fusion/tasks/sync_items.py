@@ -1999,15 +1999,26 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
     try:
         import json as _json
         if not batch_id:
-            batch_id = frappe.db.get_default(f"wc_bulk_sync_current_{user}", parent="__default")
+            result = frappe.db.sql("""
+                SELECT defvalue FROM `tabDefaultValue`
+                WHERE defkey = %s AND parent = '__default' LIMIT 1
+            """, f"wc_bulk_sync_current_{user}", as_dict=True)
+            batch_id = result[0].defvalue if result else None
         cache_key = f"wc_bulk_sync_{user}_{batch_id}"
-        raw = frappe.db.get_default(cache_key, parent="__default")
+        result = frappe.db.sql("""
+            SELECT defvalue FROM `tabDefaultValue`
+            WHERE defkey = %s AND parent = '__default' LIMIT 1
+        """, cache_key, as_dict=True)
+        raw = result[0].defvalue if result else None
         progress = _json.loads(raw) if raw and raw.strip() else None
 
         if progress:
             progress["completed_chunks"] += 1
             progress["synced_items"] = progress.get("synced_items", 0) + synced_in_chunk
-            frappe.db.set_default(cache_key, _json.dumps(progress), parent="__default")
+            frappe.db.sql("""
+                UPDATE `tabDefaultValue` SET defvalue = %s
+                WHERE defkey = %s AND parent = '__default'
+            """, (_json.dumps(progress), cache_key))
             frappe.db.commit()
 
             total_items = progress.get("total_items", "?")
