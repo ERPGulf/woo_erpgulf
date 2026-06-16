@@ -1989,7 +1989,7 @@ def enqueue_next_chunk(user, batch_id=None):
         batch_id=batch_id,
         queue="long",
         timeout=18000,
-        job_name=f"wc_sync_chunk_{completed}_{frappe.generate_hash(length=8)}",
+        job_name=f"wc_sync_chunk_{completed}_{batch_id}",
     )
 def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
 
