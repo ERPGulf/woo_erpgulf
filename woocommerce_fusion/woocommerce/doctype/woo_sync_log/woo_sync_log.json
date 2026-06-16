@@ -5,6 +5,7 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "batch_id",
   "item_code",
   "item_name",
   "woocommerce_id",
@@ -173,12 +174,17 @@
    "fieldname": "verification_results",
    "fieldtype": "Text",
    "label": "Verification Results"
+  },
+  {
+   "fieldname": "batch_id",
+   "fieldtype": "Data",
+   "label": "Batch ID"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-14 10:04:10.565170",
+ "modified": "2026-06-16 13:05:08.122062",
  "modified_by": "Administrator",
  "module": "WooCommerce",
  "name": "Woo Sync Log",

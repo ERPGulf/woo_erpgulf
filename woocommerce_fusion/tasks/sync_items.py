@@ -477,6 +477,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 "doctype": "Woo Sync Log",
                 "item_code": item_code,
                 "item_name": item.item_name,
+                "batch_id": getattr(frappe.local, "wc_batch_id", ""),
                 "woo_name_arabic": item.custom_woo_name__arabic or "",
                 "woocommerce_id": str(product_id),
                 "woocommerce_server": self.server_name or "",
@@ -1890,9 +1891,12 @@ def bulk_run_item_sync(items):
     ]
 
     import json as _json
+    batch_id = frappe.utils.now().replace(" ", "_").replace(":", "-")
+    cache_key = f"wc_bulk_sync_{user}_{batch_id}"
     frappe.db.set_default(
-        f"wc_bulk_sync_{user}",
+        cache_key,
         _json.dumps({
+            "batch_id": batch_id,
             "chunks": chunks,
             "total_chunks": len(chunks),
             "completed_chunks": 0,
@@ -1901,27 +1905,32 @@ def bulk_run_item_sync(items):
         }),
         parent="__default"
     )
+    # Store current batch_id pointer
+    frappe.db.set_default(f"wc_bulk_sync_current_{user}", batch_id, parent="__default")
     frappe.db.commit()
 
     frappe.log_error(
         "Bulk Sync Started",
-        f"Started bulk sync with {total_items} items in {len(chunks)} chunks — triggered by {user}"
+        f"Started bulk sync with {total_items} items in {len(chunks)} chunks — triggered by {user} — batch {batch_id}"
     )
 
     # enqueue only first chunk
-    enqueue_next_chunk(user)
+    enqueue_next_chunk(user, batch_id)
 
     return {
         "status": "started",
+        "batch_id": batch_id,
         "message": f"Sync started for {total_items} item(s)."
     }
     
-def enqueue_next_chunk(user):
+def enqueue_next_chunk(user, batch_id=None):
 
-    cache_key = f"wc_bulk_sync_{user}"
     import json as _json
-    frappe.db.close()
-    frappe.db.connect()
+    if not batch_id:
+        batch_id = frappe.db.get_default(f"wc_bulk_sync_current_{user}", parent="__default")
+    if not batch_id:
+        return
+    cache_key = f"wc_bulk_sync_{user}_{batch_id}"
     raw = frappe.db.get_default(cache_key, parent="__default")
     progress = _json.loads(raw) if raw and raw.strip() else None
 
@@ -1967,13 +1976,16 @@ def enqueue_next_chunk(user):
         items=chunk,
         chunk_index=completed,
         user=user,
+        batch_id=batch_id,
         queue="long",
         timeout=18000,
         job_name=f"wc_sync_chunk_{completed}_{frappe.generate_hash(length=8)}",
     )
-def background_bulk_sync_chunk(items, chunk_index, user=None):
+def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
 
     frappe.set_user(user or "Administrator")
+
+    frappe.local.wc_batch_id = batch_id or ""
 
     synced_in_chunk = 0
     for item_code in items:
@@ -1986,7 +1998,9 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
     # always update progress regardless of errors
     try:
         import json as _json
-        cache_key = f"wc_bulk_sync_{user}"
+        if not batch_id:
+            batch_id = frappe.db.get_default(f"wc_bulk_sync_current_{user}", parent="__default")
+        cache_key = f"wc_bulk_sync_{user}_{batch_id}"
         raw = frappe.db.get_default(cache_key, parent="__default")
         progress = _json.loads(raw) if raw and raw.strip() else None
 
@@ -1994,31 +2008,30 @@ def background_bulk_sync_chunk(items, chunk_index, user=None):
             progress["completed_chunks"] += 1
             progress["synced_items"] = progress.get("synced_items", 0) + synced_in_chunk
             frappe.db.set_default(cache_key, _json.dumps(progress), parent="__default")
-
             frappe.db.commit()
 
             total_items = progress.get("total_items", "?")
-            synced_so_far = progress.get("synced_items", synced_in_chunk)
 
             if progress["completed_chunks"] == progress["total_chunks"]:
                 frappe.log_error(
                     "Bulk Sync Finished",
-                    f"Finished bulk sync — successfully processed all {total_items} items"
+                    f"Finished bulk sync — batch {batch_id} — successfully processed all {total_items} items"
                 )
                 frappe.publish_realtime(
                     event="wc_bulk_sync_complete",
                     message={"status": "done"},
                     user=user
                 )
-                # Clear the progress key
-                frappe.db.set_default(cache_key, "", parent="__default")
+                # Mark as finished — keep the record
+                progress["status"] = "finished"
+                frappe.db.set_default(cache_key, _json.dumps(progress), parent="__default")
                 frappe.db.commit()
             else:
-                enqueue_next_chunk(user)
+                enqueue_next_chunk(user, batch_id)
         else:
             frappe.log_error(
                 "Bulk Sync Stopped Midway",
-                f"Stopped bulk sync midway after chunk {chunk_index} — cache lost. "
+                f"Stopped bulk sync midway — batch {batch_id} — chunk {chunk_index}. "
                 f"Items in this chunk: {len(items)}, chunk synced: {synced_in_chunk}"
             )
     except Exception:
