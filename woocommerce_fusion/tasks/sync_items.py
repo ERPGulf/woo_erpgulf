@@ -437,7 +437,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         self._push_log.append(result)
         return result
 
-    def log_sync_result(self, item_code, product_id, push_log, trigger="Manual", duration=0, traceback="", batch_id=""):
+    def log_sync_result(self, item_code, product_id, push_log, trigger="Manual", duration=0, traceback=""):
         try:
             from frappe.utils import nowdate, nowtime
 
@@ -477,7 +477,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 "doctype": "Woo Sync Log",
                 "item_code": item_code,
                 "item_name": item.item_name,
-                "batch_id": batch_id or frappe.flags.get("wc_batch_id") or "",
+                "batch_id": "",
                 "woo_name_arabic": item.custom_woo_name__arabic or "",
                 "woocommerce_id": str(product_id),
                 "woocommerce_server": self.server_name or "",
@@ -1164,8 +1164,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             product_id,
             self._push_log,
             trigger=getattr(self, "_sync_trigger", "Manual"),
-            duration=duration,
-            batch_id=getattr(self, "_batch_id", "")
+            duration=duration
         )
             
     import re
@@ -1995,8 +1994,17 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
         try:
             run_item_sync(item_code=item_code, enqueue=False)
             synced_in_chunk += 1
-            # Update batch_id on the latest Woo Sync Log for this item
-            
+            if batch_id:
+                frappe.db.sql("""
+                    UPDATE `tabWoo Sync Log`
+                    SET batch_id = %s
+                    WHERE item_code = %s
+                    AND (batch_id IS NULL OR batch_id = '')
+                    AND creation >= NOW() - INTERVAL 2 MINUTE
+                    ORDER BY creation DESC
+                    LIMIT 1
+                """, (batch_id, item_code))
+                frappe.db.commit()
         except Exception:
             frappe.log_error(frappe.get_traceback(), "WooCommerce Sync Error")
 
