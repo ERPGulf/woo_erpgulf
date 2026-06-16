@@ -477,7 +477,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 "doctype": "Woo Sync Log",
                 "item_code": item_code,
                 "item_name": item.item_name,
-                "batch_id": "",
+                "batch_id": getattr(frappe.local, "wc_batch_id", ""),
                 "woo_name_arabic": item.custom_woo_name__arabic or "",
                 "woocommerce_id": str(product_id),
                 "woocommerce_server": self.server_name or "",
@@ -1984,10 +1984,7 @@ def enqueue_next_chunk(user, batch_id=None):
 def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
 
     frappe.set_user(user or "Administrator")
-
-    global _current_batch_id
-    _current_batch_id = batch_id or ""
-    frappe.flags.wc_batch_id = batch_id or ""
+    frappe.local.wc_batch_id = batch_id or ""
 
     synced_in_chunk = 0
     for item_code in items:
