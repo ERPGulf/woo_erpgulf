@@ -1996,6 +1996,10 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
             frappe.log_error(frappe.get_traceback(), "WooCommerce Sync Error")
 
     # always update progress regardless of errors
+    frappe.log_error(
+        "Bulk Sync Chunk Debug",
+        f"Chunk {chunk_index} finished. batch_id={batch_id}, user={user}, synced={synced_in_chunk}"
+    )
     try:
         import json as _json
         if not batch_id:
