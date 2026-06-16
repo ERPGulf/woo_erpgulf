@@ -2016,9 +2016,10 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
             progress["completed_chunks"] += 1
             progress["synced_items"] = progress.get("synced_items", 0) + synced_in_chunk
             frappe.db.sql("""
-                UPDATE `tabDefaultValue` SET defvalue = %s
-                WHERE defkey = %s AND parent = '__default'
-            """, (_json.dumps(progress), cache_key))
+                INSERT INTO `tabDefaultValue` (name, defkey, defvalue, parent)
+                VALUES (%s, %s, %s, '__default')
+                ON DUPLICATE KEY UPDATE defvalue = %s
+            """, (frappe.generate_hash(length=10), cache_key, _json.dumps(progress), _json.dumps(progress)))
             frappe.db.commit()
 
             total_items = progress.get("total_items", "?")
@@ -2036,9 +2037,10 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
                 # Mark as finished — keep the record
                 progress["status"] = "finished"
                 frappe.db.sql("""
-                    UPDATE `tabDefaultValue` SET defvalue = %s
-                    WHERE defkey = %s AND parent = '__default'
-                """, (_json.dumps(progress), cache_key))
+                    INSERT INTO `tabDefaultValue` (name, defkey, defvalue, parent)
+                    VALUES (%s, %s, %s, '__default')
+                    ON DUPLICATE KEY UPDATE defvalue = %s
+                """, (frappe.generate_hash(length=10), cache_key, _json.dumps(progress), _json.dumps(progress)))
                 frappe.db.commit()
             else:
                 enqueue_next_chunk(user, batch_id)
