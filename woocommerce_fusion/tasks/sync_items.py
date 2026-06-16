@@ -121,6 +121,12 @@ def run_item_sync(
             return (None, None)
         
         if not item.woocommerce_servers:
+            _batch = (
+                getattr(frappe.local, "wc_batch_id", "")
+                or frappe.cache().get_value(f"wc_current_batch_{frappe.session.user}")
+                or ""
+            )
+            frappe.log_error("Batch Debug", f"local={getattr(frappe.local, 'wc_batch_id', 'MISSING')} redis={frappe.cache().get_value(f'wc_current_batch_{frappe.session.user}')} user={frappe.session.user}")
             frappe.get_doc({
                 "doctype": "Woo Sync Log",
                 "item_code": item.item_code,
