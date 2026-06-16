@@ -437,7 +437,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         self._push_log.append(result)
         return result
 
-    def log_sync_result(self, item_code, product_id, push_log, trigger="Manual", duration=0, traceback=""):
+    def log_sync_result(self, item_code, product_id, push_log, trigger="Manual", duration=0, traceback="", batch_id=""):
         try:
             from frappe.utils import nowdate, nowtime
 
@@ -477,7 +477,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 "doctype": "Woo Sync Log",
                 "item_code": item_code,
                 "item_name": item.item_name,
-                "batch_id": _current_batch_id or getattr(frappe.local, "wc_batch_id", ""),
+                "batch_id": batch_id or frappe.flags.get("wc_batch_id") or "",
                 "woo_name_arabic": item.custom_woo_name__arabic or "",
                 "woocommerce_id": str(product_id),
                 "woocommerce_server": self.server_name or "",
@@ -1164,7 +1164,8 @@ class SynchroniseItem(SynchroniseWooCommerce):
             product_id,
             self._push_log,
             trigger=getattr(self, "_sync_trigger", "Manual"),
-            duration=duration
+            duration=duration,
+            batch_id=getattr(self, "_batch_id", "")
         )
             
     import re
@@ -1987,6 +1988,7 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
 
     global _current_batch_id
     _current_batch_id = batch_id or ""
+    frappe.flags.wc_batch_id = batch_id or ""
 
     synced_in_chunk = 0
     for item_code in items:
