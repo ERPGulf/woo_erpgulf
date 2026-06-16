@@ -2035,7 +2035,10 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
                 )
                 # Mark as finished — keep the record
                 progress["status"] = "finished"
-                frappe.db.set_default(cache_key, _json.dumps(progress), parent="__default")
+                frappe.db.sql("""
+                    UPDATE `tabDefaultValue` SET defvalue = %s
+                    WHERE defkey = %s AND parent = '__default'
+                """, (_json.dumps(progress), cache_key))
                 frappe.db.commit()
             else:
                 enqueue_next_chunk(user, batch_id)
