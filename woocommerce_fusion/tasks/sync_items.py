@@ -477,7 +477,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 "doctype": "Woo Sync Log",
                 "item_code": item_code,
                 "item_name": item.item_name,
-                "batch_id": getattr(frappe.local, "wc_batch_id", ""),
+                "batch_id": _current_batch_id or getattr(frappe.local, "wc_batch_id", ""),
                 "woo_name_arabic": item.custom_woo_name__arabic or "",
                 "woocommerce_id": str(product_id),
                 "woocommerce_server": self.server_name or "",
@@ -1994,15 +1994,7 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
             run_item_sync(item_code=item_code, enqueue=False)
             synced_in_chunk += 1
             # Update batch_id on the latest Woo Sync Log for this item
-            if batch_id:
-                frappe.db.sql("""
-                    UPDATE `tabWoo Sync Log` 
-                    SET batch_id = %s 
-                    WHERE item_code = %s 
-                    AND batch_id IS NULL
-                    AND creation >= NOW() - INTERVAL 5 MINUTE
-                """, (batch_id, item_code))
-                frappe.db.commit()
+            
         except Exception:
             frappe.log_error(frappe.get_traceback(), "WooCommerce Sync Error")
 
