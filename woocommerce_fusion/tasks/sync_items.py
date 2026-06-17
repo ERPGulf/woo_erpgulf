@@ -1888,6 +1888,18 @@ def bulk_run_item_sync(items):
         items = json.loads(items)
 
     user = frappe.session.user
+
+    # ✅ Clean up stale batch records before starting new sync
+    old_records = frappe.get_all(
+        "DefaultValue",
+        filters={"defkey": ["like", f"wc_bulk_sync_{user}%"], "parent": "__default"},
+        fields=["name"]
+    )
+    for r in old_records:
+        frappe.delete_doc("DefaultValue", r.name, ignore_permissions=True)
+    if old_records:
+        frappe.db.commit()
+
     total_items = len(items)
 
     chunks = [
@@ -1910,7 +1922,6 @@ def bulk_run_item_sync(items):
         }),
         parent="__default"
     )
-    # Store current batch_id pointer
     frappe.db.set_default(f"wc_bulk_sync_current_{user}", batch_id, parent="__default")
     frappe.db.commit()
 
@@ -1919,7 +1930,6 @@ def bulk_run_item_sync(items):
         f"Started bulk sync with {total_items} items in {len(chunks)} chunks — triggered by {user} — batch {batch_id}"
     )
 
-    # enqueue only first chunk
     enqueue_next_chunk(user, batch_id)
 
     return {
