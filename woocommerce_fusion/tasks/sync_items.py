@@ -121,12 +121,7 @@ def run_item_sync(
             return (None, None)
         
         if not item.woocommerce_servers:
-            _batch = (
-                getattr(frappe.local, "wc_batch_id", "")
-                or frappe.cache().get_value(f"wc_current_batch_{frappe.session.user}")
-                or ""
-            )
-            frappe.log_error("Batch Debug", f"local={getattr(frappe.local, 'wc_batch_id', 'MISSING')} redis={frappe.cache().get_value(f'wc_current_batch_{frappe.session.user}')} user={frappe.session.user}")
+            
             frappe.get_doc({
                 "doctype": "Woo Sync Log",
                 "item_code": item.item_code,
@@ -1956,7 +1951,7 @@ def enqueue_next_chunk(user, batch_id=None):
         running_jobs = frappe.get_all(
             "RQ Job",
             filters={
-                "job_name": ["like", "wc_sync_chunk_%"],
+                "job_name": ["like", f"wc_sync_chunk_%_{batch_id}"],
                 "status": ["in", ["queued", "started"]],
                 "creation": [">", frappe.utils.add_to_date(None, minutes=-30)],
             },
@@ -2016,10 +2011,7 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
             frappe.log_error(frappe.get_traceback(), "WooCommerce Sync Error")
 
     # always update progress regardless of errors
-    frappe.log_error(
-        "Bulk Sync Chunk Debug",
-        f"Chunk {chunk_index} finished. batch_id={batch_id}, user={user}, synced={synced_in_chunk}"
-    )
+    
     try:
         import json as _json
         if not batch_id:
@@ -2039,11 +2031,7 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
         if progress:
             progress["completed_chunks"] += 1
             progress["synced_items"] = progress.get("synced_items", 0) + synced_in_chunk
-            frappe.db.sql("""
-                INSERT INTO `tabDefaultValue` (name, defkey, defvalue, parent)
-                VALUES (%s, %s, %s, '__default')
-                ON DUPLICATE KEY UPDATE defvalue = %s
-            """, (frappe.generate_hash(length=10), cache_key, _json.dumps(progress), _json.dumps(progress)))
+            frappe.db.set_default(cache_key, _json.dumps(progress), parent="__default")
             frappe.db.commit()
 
             total_items = progress.get("total_items", "?")
@@ -2060,11 +2048,7 @@ def background_bulk_sync_chunk(items, chunk_index, user=None, batch_id=None):
                 )
                 # Mark as finished — keep the record
                 progress["status"] = "finished"
-                frappe.db.sql("""
-                    INSERT INTO `tabDefaultValue` (name, defkey, defvalue, parent)
-                    VALUES (%s, %s, %s, '__default')
-                    ON DUPLICATE KEY UPDATE defvalue = %s
-                """, (frappe.generate_hash(length=10), cache_key, _json.dumps(progress), _json.dumps(progress)))
+                frappe.db.set_default(cache_key, _json.dumps(progress), parent="__default")
                 frappe.db.commit()
             else:
                 enqueue_next_chunk(user, batch_id)
