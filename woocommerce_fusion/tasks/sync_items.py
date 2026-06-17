@@ -135,13 +135,17 @@ def run_item_sync(
             frappe.db.commit()
             return (None, None)
         for wc_server in item.woocommerce_servers:
-            sync = SynchroniseItem(
-                item=ERPNextItemToSync(item=item, item_woocommerce_server_idx=wc_server.idx)
-            )
-            if enqueue:
-                frappe.enqueue(sync.run)
-            else:
-                sync.run()
+            try:
+                sync = SynchroniseItem(
+                    item=ERPNextItemToSync(item=item, item_woocommerce_server_idx=wc_server.idx)
+                )
+                if enqueue:
+                    frappe.enqueue(sync.run)
+                else:
+                    sync.run()
+            except IndexError:
+                frappe.log_error(f"WooCommerce server index out of range for item {item.item_code}", "Sync Skip")
+                continue
 
     return (
         sync.item.item if sync and sync.item else None,
