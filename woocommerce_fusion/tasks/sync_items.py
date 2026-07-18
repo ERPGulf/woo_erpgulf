@@ -522,7 +522,10 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 frappe.log_error("No Product Bundle found for item", item.item.item_code)
                 return {}
             bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
-            
+
+            # Ensure all child items exist in WooCommerce first
+            self.ensure_children_synced(bundle_doc)
+
             bundle_items = []
             for row in bundle_doc.items:
                 bundle_items.append({
@@ -1137,6 +1140,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                     "name"
                 )
                 bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
+                self.ensure_children_synced(bundle_doc)
                 woosb_ids = {}
                 for idx, bi in enumerate(bundle_doc.items):
                     wc_id = frappe.db.get_value(
@@ -1641,6 +1645,30 @@ class SynchroniseItem(SynchroniseWooCommerce):
             1,
             update_modified=False,
         )
+    def ensure_children_synced(self, bundle_doc):
+        """
+        Ensure every child item of a bundle exists in WooCommerce (has an ID).
+        Syncs any child missing a woocommerce_id so the bundle can reference it.
+        Skips children that are themselves bundles (avoids recursion).
+        """
+        from woocommerce_fusion.tasks.sync_items import run_item_sync
+        for row in bundle_doc.items:
+            child_code = row.item_code
+            wc_id = frappe.db.get_value(
+                "Item WooCommerce Server", {"parent": child_code}, "woocommerce_id"
+            )
+            if wc_id:
+                continue
+            # don't recurse into nested bundles
+            if frappe.db.exists("Product Bundle", {"new_item_code": child_code}):
+                continue
+            try:
+                run_item_sync(item_code=child_code, enqueue=False)
+            except Exception:
+                frappe.log_error(
+                    "Bundle child sync failed",
+                    f"{child_code}\n{frappe.get_traceback()}"
+                )
     def sync_kit_options(self, item, product_id):
         """Sync kit Position/Side/Type options to WooCommerce ACF meta"""
         try:
@@ -1653,6 +1681,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 return
 
             bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
+            self.ensure_children_synced(bundle_doc)
             valid_rows = []
 
             for row in bundle_doc.items:
