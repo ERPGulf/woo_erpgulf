@@ -1656,27 +1656,29 @@ class SynchroniseItem(SynchroniseWooCommerce):
             valid_rows = []
 
             for row in bundle_doc.items:
-                # ✅ ERPNext prefixes custom fields with custom_
-                position  = row.get("custom_position") or ""
-                side      = row.get("custom_side") or ""
-                opt_type  = row.get("custom_type") or ""
-                pack_size = row.get("custom_pack_size") or 0
+                # Read option fields — support both custom_ prefixed and plain fieldnames
+                position  = row.get("custom_position") or row.get("position") or ""
+                side      = row.get("custom_side") or row.get("side") or ""
+                opt_type  = row.get("custom_type") or row.get("type") or ""
+                pack_size = row.get("custom_pack_size") or row.get("pack_size") or 0
 
-                # Skip rows with no options set
-                if not any([position, side, opt_type, pack_size]):
-                    continue
-
-                # Get WooCommerce ID for this child item
                 wc_id = frappe.db.get_value(
                     "Item WooCommerce Server",
                     {"parent": row.item_code},
                     "woocommerce_id"
                 )
+
+                # TEMP DIAGNOSTIC — remove after confirming
+                frappe.log_error(
+                    "Kit Options DEBUG",
+                    f"{bundle_name} | {row.item_code} | pos={position!r} side={side!r} "
+                    f"type={opt_type!r} pack={pack_size!r} | wc_id={wc_id}"
+                )
+
+                # Skip rows with no options set
+                if not any([position, side, opt_type, pack_size]):
+                    continue
                 if not wc_id:
-                    frappe.log_error(
-                        "Kit Options: No WC ID",
-                        f"Item {row.item_code} has no WooCommerce ID"
-                    )
                     continue
 
                 valid_rows.append({
