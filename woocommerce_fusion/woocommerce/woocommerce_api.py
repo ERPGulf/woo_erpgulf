@@ -310,8 +310,12 @@ class WooCommerceResource(Document):
 			if self.parent_id and self.child_resource
 			else self.resource
 		)
+		# ERP is the Arabic source of truth — create products in Arabic (WPML)
+		if self.doctype == "WooCommerce Product":
+			endpoint += ("&" if "?" in endpoint else "?") + "lang=ar"
 		try:
 			response = self.current_wc_api.api.post(endpoint, data=record)
+			
 		except Exception as err:
 			log_and_raise_error(err, error_text="db_insert failed")
 		if response.status_code != 201:
