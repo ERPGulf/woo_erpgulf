@@ -1,0 +1,516 @@
+"""
+ERPNext <-> WooCommerce product reconciliation (Script Report).
+
+One row per product. ERPNext values and LIVE Woo values sit side by side:
+SKU | Item name (ERP) | Woo name | ERP stock | Woo stock | stock match
+    | ERP price | Woo price | price match | Woo status | Woo id | Woo matches
+
+Matching key: ERPNext `item_code`  ==  WooCommerce product `sku`.
+(So it does NOT depend on any custom Woo-id field — that column is display only.)
+
+Rules honoured:
+- Read-only. Frappe ORM for the ERP side. WooCommerce REST API v3 for the Woo side.
+- No writes anywhere. No raw SQL on ERPNext. No direct MariaDB access.
+
+Place this folder at:
+    <your_app>/<your_app>/report/woo_product_reconcile/
+e.g. woo_erpgulf/woo_erpgulf/report/woo_product_reconcile/
+Then `bench --site <site> migrate` (or reload) so ERPNext registers the report.
+"""
+
+import re
+
+import frappe
+from frappe import _
+
+try:
+    import requests
+except Exception:  # pragma: no cover
+    requests = None
+
+
+# =====================================================================
+# CONFIG
+# ---------------------------------------------------------------------
+# NOTHING IS HARDCODED. The Woo URL + consumer key/secret (+ price list)
+# are read live from the enabled "WooCommerce Server" record in
+# woocommerce_fusion (the one with "Enable Sync" ticked).
+WOO_SERVER_DOCTYPE = "WooCommerce Server"
+
+# Selling price list for the ERP price column.
+#   None  -> use the enabled WooCommerce Server's own `price_list` field
+#   "..." -> override with a specific price list name
+PRICE_LIST        = None
+WOO_ID_FIELD      = "woocommerce_id"     # Item custom field holding Woo id (display only)
+
+# Safety cap for live paging. 100 products per page -> 30 pages = 3000 products.
+MAX_WOO_PAGES     = 30
+PRICE_TOLERANCE   = 0.01                 # treat price diffs below this as equal
+API_TIMEOUT       = 30                   # seconds per Woo API call
+# =====================================================================
+
+
+# credentials resolved once per report run
+_WOO_SERVER_CACHE = {}
+
+
+def _get_woo_server():
+    """(base_url, consumer_key, consumer_secret, price_list) from the enabled
+    WooCommerce Server record. Cached for the duration of the request."""
+    if "val" in _WOO_SERVER_CACHE:
+        return _WOO_SERVER_CACHE["val"]
+
+    name = frappe.db.get_value(WOO_SERVER_DOCTYPE, {"enable_sync": 1}, "name")
+    if not name:
+        frappe.throw(_("No WooCommerce Server has 'Enable Sync' ticked."))
+
+    doc = frappe.get_doc(WOO_SERVER_DOCTYPE, name)
+    base = (doc.get("woocommerce_server_url") or "").rstrip("/")
+    key = (doc.get("api_consumer_key") or "").strip()
+    sec = (doc.get("api_consumer_secret") or "").strip()
+    plist = PRICE_LIST or doc.get("price_list") or "Standard Selling"
+
+    if not (base and key and sec):
+        frappe.throw(_("Enabled WooCommerce Server '{0}' is missing URL / key / secret.").format(name))
+
+    val = (base, key, sec, plist)
+    _WOO_SERVER_CACHE["val"] = val
+    return val
+
+
+def execute(filters=None):
+    filters = filters or {}
+    items = get_items(filters)
+    warehouses = get_branch_warehouses([i["item_code"] for i in items], filters)
+    columns = get_columns(warehouses)
+    data = get_data(filters, items, warehouses)
+    return columns, data
+
+
+def wh_fieldname(wh):
+    return "wh_" + frappe.scrub(wh)
+
+
+def get_columns(warehouses):
+    # ERP columns (black) sit right next to their Woo counterpart (blue).
+    cols = [
+        {"label": _("SKU"),             "fieldname": "sku",         "fieldtype": "Data",     "width": 150},
+        {"label": _("Diff on"),         "fieldname": "diff_on",     "fieldtype": "Data",     "width": 120},
+        {"label": _("Item name (ERP)"), "fieldname": "erp_name",    "fieldtype": "Data",     "width": 200},
+        {"label": _("Woo name"),        "fieldname": "woo_name",    "fieldtype": "Data",     "width": 200},
+        {"label": _("ERP compat"),      "fieldname": "erp_compat",  "fieldtype": "Data",     "width": 220},
+        {"label": _("Woo compat"),      "fieldname": "woo_compat",  "fieldtype": "Data",     "width": 220},
+    ]
+    # ---- per branch: ERP qty (black) next to Woo qty (blue) ----
+    for wh in warehouses:
+        cols.append({"label": wh + " (ERP)", "fieldname": "erpwh_" + frappe.scrub(wh), "fieldtype": "Float", "width": 115, "precision": 0})
+        cols.append({"label": wh + " (Woo)", "fieldname": "woowh_" + frappe.scrub(wh), "fieldtype": "Float", "width": 115, "precision": 0})
+    cols += [
+        {"label": _("ERP stock (all)"), "fieldname": "erp_stock",   "fieldtype": "Float",    "width": 100, "precision": 0},
+        {"label": _("Woo stock"),       "fieldname": "woo_stock",   "fieldtype": "Data",     "width": 90},
+        {"label": _("Stock"),           "fieldname": "stock_match", "fieldtype": "Data",     "width": 60},
+        {"label": _("ERP price"),       "fieldname": "erp_price",   "fieldtype": "Currency", "width": 100},
+        {"label": _("Woo price"),       "fieldname": "woo_price",   "fieldtype": "Currency", "width": 100},
+        {"label": _("Price"),           "fieldname": "price_match", "fieldtype": "Data",     "width": 60},
+        {"label": _("Presence"),        "fieldname": "presence",    "fieldtype": "Data",     "width": 120},
+        {"label": _("Woo status"),      "fieldname": "woo_status",  "fieldtype": "Data",     "width": 90},
+        {"label": _("Woo id"),          "fieldname": "woo_id",      "fieldtype": "Data",     "width": 80},
+        {"label": _("Woo matches"),     "fieldname": "woo_matches", "fieldtype": "Int",      "width": 90},
+    ]
+    return cols
+
+
+def get_items(filters):
+    item_filters = {}
+    if filters.get("brand"):
+        item_filters["brand"] = filters["brand"]
+    if filters.get("item_group"):
+        item_filters["item_group"] = filters["item_group"]
+    if filters.get("sku"):
+        item_filters["item_code"] = ["like", "%%%s%%" % filters["sku"]]
+    if not filters.get("include_disabled"):
+        item_filters["disabled"] = 0
+    limit = int(filters.get("max_products") or 500)
+    return frappe.get_all(
+        "Item",
+        filters=item_filters,
+        fields=["item_code", "item_name", "disabled", WOO_ID_FIELD + " as woo_id"],
+        order_by="item_code asc",
+        limit_page_length=limit,
+    )
+
+
+def get_branch_warehouses(codes, filters):
+    """Branch warehouses to show as columns: the specific one if filtered,
+    else every warehouse that has a stock record for the shown items."""
+    if filters.get("warehouse"):
+        return [filters["warehouse"]]
+    if not codes:
+        return []
+    rows = frappe.get_all(
+        "Bin",
+        filters={"item_code": ["in", codes]},
+        fields=["warehouse"],
+        group_by="warehouse",
+        order_by="warehouse asc",
+    )
+    whs = [r["warehouse"] for r in rows if r.get("warehouse")]
+    # drop group/parent warehouses (e.g. "All Warehouses") — they hold no stock
+    if whs:
+        groups = {g["name"] for g in frappe.get_all(
+            "Warehouse", filters={"name": ["in", whs], "is_group": 1}, fields=["name"])}
+        whs = [w for w in whs if w not in groups]
+    return whs
+
+
+def get_data(filters, items, warehouses):
+    codes = [i["item_code"] for i in items]
+
+    price_map = get_price_map(codes)
+    stock_map = get_stock_map(codes)
+    compat_map = get_erp_compat_map(codes)
+
+    # ---- Woo products (LIVE REST) ----
+    if filters.get("sku") and len(codes) <= 50:
+        woo_map = {c: fetch_woo_one(c) for c in codes}
+    else:
+        woo_map = fetch_woo_map()
+
+    only_mismatch = bool(filters.get("only_mismatches"))
+    rows = []
+
+    for it in items:
+        sku = it["item_code"]
+        erp_name = it.get("item_name") or ""
+        erp_price = price_map.get(sku)
+        st = stock_map.get(sku, {})
+        erp_stock = st.get("_total", 0.0)
+
+        woo_list = woo_map.get(sku) or []
+        woo = woo_list[0] if woo_list else None
+
+        if woo:
+            woo_name = woo.get("name") or ""
+            woo_status = woo.get("status") or ""
+            woo_id = woo.get("id")
+            woo_stock_raw = woo.get("stock_quantity")
+            woo_stock_disp = "—" if woo_stock_raw is None else woo_stock_raw
+            woo_price = to_float(woo.get("regular_price") or woo.get("price"))
+            presence = _("Both")
+        else:
+            woo_name = ""
+            woo_status = ""
+            woo_id = ""
+            woo_stock_raw = None
+            woo_stock_disp = "—"
+            woo_price = None
+            presence = _("ERP only")
+
+        stock_match = compare_stock(erp_stock, woo_stock_raw)
+        price_match = compare_price(erp_price, woo_price)
+        diff_on = build_diff_on(presence, stock_match, price_match, erp_name, woo_name)
+
+        erp_compat = compat_map.get(sku, "")
+        woo_compat = woo_compat_summary(woo)
+
+        row = {
+            "sku": sku,
+            "diff_on": diff_on,
+            "erp_name": erp_name,
+            "woo_name": woo_name,
+            "erp_compat": erp_compat,
+            "woo_compat": woo_compat,
+            "erp_stock": erp_stock,
+            "woo_stock": woo_stock_disp,
+            "stock_match": stock_match,
+            "erp_price": erp_price,
+            "woo_price": woo_price,
+            "price_match": price_match,
+            "presence": presence,
+            "woo_status": woo_status,
+            "woo_id": woo_id or it.get("woo_id") or "",
+            "woo_matches": len(woo_list),
+        }
+        wb = woo_branch_stock(woo)
+        for wh in warehouses:
+            row["erpwh_" + frappe.scrub(wh)] = st.get(wh)
+            row["woowh_" + frappe.scrub(wh)] = wb.get(woo_branch_slug(wh))
+
+        if only_mismatch and not diff_on:
+            continue
+        rows.append(row)
+
+    # ---- Woo-only SKUs (in Woo, not in ERPNext) ----
+    if not filters.get("sku"):
+        erp_set = set(codes)
+        for sku, wlist in woo_map.items():
+            if sku in erp_set:
+                continue
+            woo = wlist[0]
+            r = {
+                "sku": sku,
+                "diff_on": _("Missing in ERP"),
+                "erp_name": "",
+                "woo_name": woo.get("name") or "",
+                "erp_compat": "",
+                "woo_compat": woo_compat_summary(woo),
+                "erp_stock": None,
+                "woo_stock": "—" if woo.get("stock_quantity") is None else woo.get("stock_quantity"),
+                "stock_match": "—",
+                "erp_price": None,
+                "woo_price": to_float(woo.get("regular_price") or woo.get("price")),
+                "price_match": "—",
+                "presence": _("Woo only"),
+                "woo_status": woo.get("status") or "",
+                "woo_id": woo.get("id"),
+                "woo_matches": len(wlist),
+            }
+            wb = woo_branch_stock(woo)
+            for wh in warehouses:
+                r["erpwh_" + frappe.scrub(wh)] = None
+                r["woowh_" + frappe.scrub(wh)] = wb.get(woo_branch_slug(wh))
+            rows.append(r)
+
+    return rows
+
+
+def build_diff_on(presence, stock_match, price_match, erp_name, woo_name):
+    """Short, sortable summary of what differs for this row."""
+    if presence == _("ERP only"):
+        return _("Missing in Woo")
+    parts = []
+    if stock_match == "✗":
+        parts.append(_("Stock"))
+    if price_match == "✗":
+        parts.append(_("Price"))
+    a, b = (erp_name or "").strip().lower(), (woo_name or "").strip().lower()
+    if a and b and a != b:
+        parts.append(_("Name"))
+    return " + ".join(parts)   # empty string = everything matches
+
+
+# ---------------------------------------------------------------------
+# Compatibility + per-branch stock (parsed from Woo ACF postmeta)
+# ---------------------------------------------------------------------
+COMPAT_MAX = 3   # vehicles to list before "+N"
+
+# Optional overrides: ERP warehouse name -> Woo branch slug.
+# If a warehouse isn't listed here, the slug is guessed as "<first word>-branch"
+# (e.g. "Khobar Warehouse" -> "khobar-branch").
+BRANCH_MAP = {
+    # "Khobar Warehouse": "khobar-branch",
+}
+
+
+def woo_branch_slug(wh):
+    if wh in BRANCH_MAP:
+        return BRANCH_MAP[wh]
+    tokens = re.split(r"[\s\-]+", (wh or "").strip())
+    return (tokens[0].lower() + "-branch") if tokens and tokens[0] else ""
+
+
+def _year_range(years):
+    parts = [p.strip() for p in str(years or "").split(",") if p.strip()]
+    nums = []
+    for p in parts:
+        try:
+            nums.append(int(p))
+        except ValueError:
+            pass
+    if nums and len(nums) == (max(nums) - min(nums) + 1):
+        return "%d-%d" % (min(nums), max(nums))
+    return parts[0] if parts else ""
+
+
+def _woo_meta(woo):
+    return {str(m.get("key")): m.get("value") for m in (woo.get("meta_data") or [])} if woo else {}
+
+
+def _summarise(triples):
+    """triples = [(brand, model, years), ...] -> 'Brand Model (years), ..., +N'."""
+    labels = []
+    for brand, model, years in triples:
+        label = " ".join(p for p in [brand, model] if p).strip()
+        yr = _year_range(years)
+        if yr:
+            label += " (%s)" % yr
+        if label.strip():
+            labels.append(label)
+    n = len(labels)
+    txt = ", ".join(labels[:COMPAT_MAX])
+    if n > COMPAT_MAX:
+        txt += ", +%d" % (n - COMPAT_MAX)
+    return txt
+
+
+def get_erp_compat_map(codes):
+    """{item_code: summary} from Item.custom_compatibility (ERP, English)."""
+    if not codes:
+        return {}
+    rows = frappe.get_all(
+        "Compatibility",
+        filters={"parenttype": "Item", "parentfield": "custom_compatibility", "parent": ["in", codes]},
+        fields=["parent", "brand", "model", "years"],
+        order_by="parent asc, idx asc",
+    )
+    grouped = {}
+    for r in rows:
+        grouped.setdefault(r["parent"], []).append(r)
+    return {pid: _summarise([(r.get("brand"), r.get("model"), r.get("years")) for r in rws])
+            for pid, rws in grouped.items()}
+
+
+def woo_compat_summary(woo):
+    """From the Woo 'add_compactable_details' ACF repeater postmeta (Arabic)."""
+    meta = _woo_meta(woo)
+    try:
+        n = int(meta.get("add_compactable_details") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    triples = [(
+        meta.get("add_compactable_details_%d_brand" % i),
+        meta.get("add_compactable_details_%d_model" % i),
+        meta.get("add_compactable_details_%d_years" % i),
+    ) for i in range(n)]
+    return _summarise(triples)
+
+
+def woo_branch_stock(woo):
+    """{branch_slug: qty} from the Woo 'branch_stock' ACF repeater postmeta."""
+    meta = _woo_meta(woo)
+    try:
+        n = int(meta.get("branch_stock") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    out = {}
+    for i in range(n):
+        slug = meta.get("branch_stock_%d_branch" % i)
+        if not slug:
+            continue
+        try:
+            out[str(slug)] = float(meta.get("branch_stock_%d_stock_qty" % i) or 0)
+        except (TypeError, ValueError):
+            out[str(slug)] = 0.0
+    return out
+
+
+# ---------------------------------------------------------------------
+# ERPNext helpers (ORM only)
+# ---------------------------------------------------------------------
+def get_price_map(codes):
+    if not codes:
+        return {}
+    _b, _k, _s, price_list = _get_woo_server()
+    rows = frappe.get_all(
+        "Item Price",
+        filters={"price_list": price_list, "item_code": ["in", codes]},
+        fields=["item_code", "price_list_rate"],
+    )
+    out = {}
+    for r in rows:
+        # keep the first / highest rate if duplicates exist
+        if r["item_code"] not in out:
+            out[r["item_code"]] = r["price_list_rate"]
+    return out
+
+
+def get_stock_map(codes):
+    """{item_code: {"_total": qty, "<warehouse>": qty, ...}} across all warehouses."""
+    if not codes:
+        return {}
+    rows = frappe.get_all(
+        "Bin",
+        filters={"item_code": ["in", codes]},
+        fields=["item_code", "warehouse", "actual_qty"],
+    )
+    out = {}
+    for r in rows:
+        d = out.setdefault(r["item_code"], {"_total": 0.0})
+        q = r.get("actual_qty") or 0.0
+        d[r["warehouse"]] = d.get(r["warehouse"], 0.0) + q
+        d["_total"] += q
+    return out
+
+
+# ---------------------------------------------------------------------
+# WooCommerce helpers (REST v3, read-only)
+#   >>> To reuse your woo_erpgulf client, replace the bodies below. <<<
+# ---------------------------------------------------------------------
+def _woo_get(path, params=None):
+    if requests is None:
+        frappe.throw(_("The 'requests' library is not available on this bench."))
+    base, key, sec, _plist = _get_woo_server()
+    resp = requests.get(
+        base + path,
+        params=params or {},
+        auth=(key, sec),
+        timeout=API_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+# Only pull the fields the report actually uses -> far smaller/faster responses.
+WOO_FIELDS = "id,sku,name,price,regular_price,stock_quantity,status,meta_data"
+
+
+def fetch_woo_one(sku):
+    """Fetch products matching a single SKU (may return >1 due to WPML translations)."""
+    try:
+        return _woo_get("/wp-json/wc/v3/products", {"sku": sku, "per_page": 100, "_fields": WOO_FIELDS})
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "woo_product_reconcile fetch_woo_one")
+        return []
+
+
+def fetch_woo_map():
+    """Page through all Woo products once -> {sku: [product, ...]}."""
+    out = {}
+    page = 1
+    while page <= MAX_WOO_PAGES:
+        try:
+            batch = _woo_get(
+                "/wp-json/wc/v3/products",
+                {"per_page": 100, "page": page, "_fields": WOO_FIELDS, "status": "publish", "orderby": "id", "order": "asc"},
+            )
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "woo_product_reconcile fetch_woo_map")
+            break
+        if not batch:
+            break
+        for p in batch:
+            sku = (p.get("sku") or "").strip()
+            if not sku:
+                continue
+            out.setdefault(sku, []).append(p)
+        if len(batch) < 100:
+            break
+        page += 1
+    return out
+
+
+# ---------------------------------------------------------------------
+# comparison helpers
+# ---------------------------------------------------------------------
+def to_float(val):
+    try:
+        if val in (None, ""):
+            return None
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def compare_stock(erp_stock, woo_stock_raw):
+    if woo_stock_raw is None:
+        return "—"          # Woo not managing stock / product absent
+    try:
+        return "✓" if float(erp_stock or 0) == float(woo_stock_raw) else "✗"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def compare_price(erp_price, woo_price):
+    if erp_price is None or woo_price is None:
+        return "—"
+    return "✓" if abs(float(erp_price) - float(woo_price)) <= PRICE_TOLERANCE else "✗"
