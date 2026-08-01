@@ -148,7 +148,7 @@ def get_items(filters):
     return frappe.get_all(
         "Item",
         filters=item_filters,
-        fields=["item_code", "item_name", "disabled", WOO_ID_FIELD + " as woo_id"],
+        fields=["item_code", "item_name", "custom_woo_name__arabic", "disabled", WOO_ID_FIELD + " as woo_id"],
         order_by="item_code asc",
         limit_page_length=limit,
     )
@@ -199,7 +199,7 @@ def get_data(filters, items, warehouses):
 
     for it in items:
         sku = it["item_code"]
-        erp_name = it.get("item_name") or ""
+        erp_name = it.get("custom_woo_name__arabic") or it.get("item_name") or ""
         erp_price = price_map.get(sku)
         st = stock_map.get(sku, {})
         erp_stock = st.get("_total", 0.0)
