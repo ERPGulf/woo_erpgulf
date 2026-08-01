@@ -75,7 +75,8 @@ frappe.query_reports["Woo Product Reconcile"] = {
     ],
 
     onload: function (report) {
-        report.page.add_inner_button(__("Sync mismatched to Woo"), function () {
+        const defaultLabel = __("Sync mismatched to Woo");
+        const $btn = report.page.add_inner_button(defaultLabel, function () {
             const rows = frappe.query_report.data || [];
             const skus = rows.filter(r => r.can_sync).map(r => r.sku);
             if (!skus.length) {
@@ -91,6 +92,7 @@ frappe.query_reports["Woo Product Reconcile"] = {
                         freeze: true,
                         freeze_message: __("Queuing background sync…"),
                         callback: function (r) {
+                            $btn.text(__("Started Sync…")).prop("disabled", true).addClass("disabled");
                             frappe.show_alert({
                                 message: __("Sync started for {0} item(s) — running in the background.", [skus.length]),
                                 indicator: "green",
@@ -99,9 +101,14 @@ frappe.query_reports["Woo Product Reconcile"] = {
                     });
                 }
             );
-        }).addClass("btn-primary");
-    },
+        });
+        $btn.addClass("btn-primary");
 
+        frappe.realtime.on("wc_bulk_sync_complete", function () {
+            $btn.text(defaultLabel).prop("disabled", false).removeClass("disabled");
+            frappe.show_alert({ message: __("WooCommerce sync finished."), indicator: "green" }, 7);
+        });
+    },
     // Everything from Woo is shown in blue; diffs are highlighted.
     formatter: function (value, row, column, data, default_formatter) {
         value = default_formatter(value, row, column, data);
