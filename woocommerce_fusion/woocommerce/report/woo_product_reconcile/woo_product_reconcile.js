@@ -27,9 +27,8 @@ frappe.query_reports["Woo Product Reconcile"] = {
         },
         {
             fieldname: "max_products",
-            label: __("Max products"),
+            label: __("Max products (blank = all)"),
             fieldtype: "Int",
-            default: 500,
         },
         {
             fieldname: "only_mismatches",
@@ -42,6 +41,36 @@ frappe.query_reports["Woo Product Reconcile"] = {
             label: __("Include disabled items"),
             fieldtype: "Check",
             default: 0,
+        },
+        {
+            fieldname: "f_disable_sync",
+            label: __("Disable Sync"),
+            fieldtype: "Select",
+            options: "\nYes\nNo",
+        },
+        {
+            fieldname: "f_vin_required",
+            label: __("VIN Required"),
+            fieldtype: "Select",
+            options: "\nYes\nNo",
+        },
+        {
+            fieldname: "f_disable_sync_no_stock",
+            label: __("Disable sync if not in stock"),
+            fieldtype: "Select",
+            options: "\nYes\nNo",
+        },
+        {
+            fieldname: "f_verified",
+            label: __("Verified"),
+            fieldtype: "Select",
+            options: "\nYes\nNo",
+        },
+        {
+            fieldname: "f_universal",
+            label: __("Universal"),
+            fieldtype: "Select",
+            options: "\nYes\nNo",
         },
     ],
 

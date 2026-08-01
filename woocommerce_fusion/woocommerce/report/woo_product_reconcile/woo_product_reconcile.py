@@ -47,6 +47,15 @@ WOO_ID_FIELD      = "woocommerce_id"     # Item custom field holding Woo id (dis
 MAX_WOO_PAGES     = 30
 PRICE_TOLERANCE   = 0.01                 # treat price diffs below this as equal
 API_TIMEOUT       = 30                   # seconds per Woo API call
+
+# Report checkbox filters -> Item field. Filter values are "Yes"/"No" (blank = all).
+CHECK_FILTERS = {
+    "f_disable_sync":          "custom_disable_sync",
+    "f_vin_required":          "custom_vin_required",
+    "f_disable_sync_no_stock": "custom_disable_sync_if_not_in_stock",
+    "f_verified":              "custom_verified",
+    "f_universal":             "custom_universal",
+}
 # =====================================================================
 
 
@@ -130,7 +139,12 @@ def get_items(filters):
         item_filters["item_code"] = ["like", "%%%s%%" % filters["sku"]]
     if not filters.get("include_disabled"):
         item_filters["disabled"] = 0
-    limit = int(filters.get("max_products") or 500)
+    item_meta = frappe.get_meta("Item")
+    for fkey, field in CHECK_FILTERS.items():
+        v = filters.get(fkey)
+        if v in ("Yes", "No") and item_meta.has_field(field):
+            item_filters[field] = 1 if v == "Yes" else 0
+    limit = int(filters.get("max_products") or 0)  # 0 = all items
     return frappe.get_all(
         "Item",
         filters=item_filters,
@@ -176,6 +190,10 @@ def get_data(filters, items, warehouses):
     else:
         woo_map = fetch_woo_map()
 
+    scoped = bool(
+        filters.get("sku") or filters.get("brand") or filters.get("item_group")
+        or any(filters.get(k) in ("Yes", "No") for k in CHECK_FILTERS)
+    )
     only_mismatch = bool(filters.get("only_mismatches"))
     rows = []
 
@@ -240,8 +258,8 @@ def get_data(filters, items, warehouses):
             continue
         rows.append(row)
 
-    # ---- Woo-only SKUs (in Woo, not in ERPNext) ----
-    if not filters.get("sku"):
+    # ---- Woo-only SKUs (only in full-catalogue mode, no scoping filter) ----
+    if not scoped:
         erp_set = set(codes)
         for sku, wlist in woo_map.items():
             if sku in erp_set:
