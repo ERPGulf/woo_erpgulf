@@ -74,6 +74,34 @@ frappe.query_reports["Woo Product Reconcile"] = {
         },
     ],
 
+    onload: function (report) {
+        report.page.add_inner_button(__("Sync mismatched to Woo"), function () {
+            const rows = frappe.query_report.data || [];
+            const skus = rows.filter(r => r.can_sync).map(r => r.sku);
+            if (!skus.length) {
+                frappe.msgprint(__("No mismatched items to sync (run/rebuild the report first)."));
+                return;
+            }
+            frappe.confirm(
+                __("Push {0} mismatched item(s) from ERPNext to WooCommerce? This writes to the LIVE store.", [skus.length]),
+                function () {
+                    frappe.call({
+                        method: "woocommerce_fusion.tasks.sync_items.bulk_run_item_sync",
+                        args: { items: skus },
+                        freeze: true,
+                        freeze_message: __("Queuing background sync…"),
+                        callback: function (r) {
+                            frappe.show_alert({
+                                message: __("Sync started for {0} item(s) — running in the background.", [skus.length]),
+                                indicator: "green",
+                            }, 7);
+                        },
+                    });
+                }
+            );
+        }).addClass("btn-primary");
+    },
+
     // Everything from Woo is shown in blue; diffs are highlighted.
     formatter: function (value, row, column, data, default_formatter) {
         value = default_formatter(value, row, column, data);

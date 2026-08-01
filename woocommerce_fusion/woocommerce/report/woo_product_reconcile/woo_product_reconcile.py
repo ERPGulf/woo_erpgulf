@@ -248,6 +248,7 @@ def get_data(filters, items, warehouses):
             "woo_status": woo_status,
             "woo_id": woo_id or it.get("woo_id") or "",
             "woo_matches": len(woo_list),
+            "can_sync": 1 if diff_on else 0,   # ERP item that differs -> syncable
         }
         wb = woo_branch_stock(woo)
         for wh in warehouses:
@@ -282,6 +283,7 @@ def get_data(filters, items, warehouses):
                 "woo_status": woo.get("status") or "",
                 "woo_id": woo.get("id"),
                 "woo_matches": len(wlist),
+                "can_sync": 0,   # no ERP item -> can't push ERP->Woo
             }
             wb = woo_branch_stock(woo)
             for wh in warehouses:
