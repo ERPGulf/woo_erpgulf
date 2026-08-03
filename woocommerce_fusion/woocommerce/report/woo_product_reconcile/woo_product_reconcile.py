@@ -44,7 +44,7 @@ PRICE_LIST        = None
 WOO_ID_FIELD      = "woocommerce_id"     # Item custom field holding Woo id (display only)
 
 # Safety cap for live paging. 100 products per page -> 30 pages = 3000 products.
-MAX_WOO_PAGES     = 30
+MAX_WOO_PAGES     = 50
 PRICE_TOLERANCE   = 0.01                 # treat price diffs below this as equal
 API_TIMEOUT       = 30                   # seconds per Woo API call
 
