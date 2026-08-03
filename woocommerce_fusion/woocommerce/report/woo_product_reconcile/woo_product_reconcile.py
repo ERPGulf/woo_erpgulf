@@ -105,6 +105,7 @@ def get_columns(warehouses):
     cols = [
         {"label": _("SKU"),             "fieldname": "sku",         "fieldtype": "Data",     "width": 150},
         {"label": _("Diff on"),         "fieldname": "diff_on",     "fieldtype": "Data",     "width": 120},
+        {"label": _("Sync note"),       "fieldname": "sync_note",   "fieldtype": "Data",     "width": 130},
         {"label": _("Item name (ERP)"), "fieldname": "erp_name",    "fieldtype": "Data",     "width": 200},
         {"label": _("Woo name"),        "fieldname": "woo_name",    "fieldtype": "Data",     "width": 200},
         {"label": _("ERP compat"),      "fieldname": "erp_compat",  "fieldtype": "Data",     "width": 220},
@@ -148,8 +149,10 @@ def get_items(filters):
     return frappe.get_all(
         "Item",
         filters=item_filters,
-        fields=["item_code", "item_name", "custom_woo_name__arabic", "disabled", WOO_ID_FIELD + " as woo_id"],
-        order_by="item_code asc",
+        fields=["item_code", "item_name", "custom_woo_name__arabic", "disabled",
+                "custom_disable_sync", "custom_disable_sync_if_not_in_stock",
+                WOO_ID_FIELD + " as woo_id"],
+                order_by="item_code asc",
         limit_page_length=limit,
     )
 
@@ -183,6 +186,9 @@ def get_data(filters, items, warehouses):
     price_map = get_price_map(codes)
     stock_map = get_stock_map(codes)
     compat_map = get_erp_compat_map(codes)
+    # items that have any Item WooCommerce Server row (needed for the "no server" reason)
+    server_parents = {r["parent"] for r in frappe.get_all(
+        "Item WooCommerce Server", filters={"parent": ["in", codes]}, fields=["parent"])} if codes else set()
 
     # ---- Woo products (LIVE REST) ----
     if filters.get("sku") and len(codes) <= 50:
@@ -234,6 +240,7 @@ def get_data(filters, items, warehouses):
         row = {
             "sku": sku,
             "diff_on": diff_on,
+            "sync_note": sync_reason(it, erp_price, sku in server_parents),
             "erp_name": erp_name,
             "woo_name": woo_name,
             "erp_compat": erp_compat,
@@ -269,6 +276,7 @@ def get_data(filters, items, warehouses):
             r = {
                 "sku": sku,
                 "diff_on": _("Missing in ERP"),
+                "sync_note": "",
                 "erp_name": "",
                 "woo_name": woo.get("name") or "",
                 "erp_compat": "",
@@ -307,6 +315,20 @@ def build_diff_on(presence, stock_match, price_match, erp_name, woo_name):
     if a and b and a != b:
         parts.append(_("Name"))
     return " + ".join(parts)   # empty string = everything matches
+
+
+def sync_reason(it, erp_price, has_server):
+    """Why the sync would skip this item (mirrors run_item_sync's checks).
+    Empty string = nothing blocks it (ready to sync / already synced)."""
+    if it.get("disabled"):
+        return _("Item disabled")
+    if it.get("custom_disable_sync") or it.get("custom_disable_sync_if_not_in_stock"):
+        return _("Sync disabled")
+    if not erp_price or float(erp_price) <= 0:
+        return _("No price")
+    if not has_server:
+        return _("No Woo server row")
+    return ""
 
 
 # ---------------------------------------------------------------------

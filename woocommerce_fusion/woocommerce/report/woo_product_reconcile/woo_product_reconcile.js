@@ -134,6 +134,11 @@ frappe.query_reports["Woo Product Reconcile"] = {
         if (column.fieldname === "presence" && data && data.presence && data.presence !== "Both") {
             value = `<span style="color:#b7791f;font-weight:600">${value}</span>`;
         }
+
+        // 5) Sync note (skip reason) -> red
+        if (column.fieldname === "sync_note" && data && data.sync_note) {
+            value = `<span style="color:#c0392b;font-weight:600">${value}</span>`;
+        }
         return value;
     },
 };
