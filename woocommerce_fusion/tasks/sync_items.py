@@ -780,25 +780,26 @@ class SynchroniseItem(SynchroniseWooCommerce):
             warehouse_stock_map = {}
             if bundle_name:
                 bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
-                for bundle_item in bundle_doc.items:
-                    child_code = bundle_item.item_code
-                    required_qty = bundle_item.qty or 1
-                    child_bins = frappe.get_all(
-                        "Bin",
-                        filters={"item_code": child_code},
-                        fields=["warehouse", "actual_qty"]
-                    )
-                    for b in child_bins:
-                        if b.actual_qty <= 0:
-                            continue
-                        possible_bundle_qty = int(b.actual_qty // required_qty)
-                        if b.warehouse not in warehouse_stock_map:
-                            warehouse_stock_map[b.warehouse] = possible_bundle_qty
-                        else:
-                            warehouse_stock_map[b.warehouse] = min(
-                                warehouse_stock_map[b.warehouse],
-                                possible_bundle_qty
-                            )
+                children = [(bi.item_code, (bi.qty or 1)) for bi in bundle_doc.items]
+                # Per-branch stock of each child + every branch any child touches.
+                child_stock = {}
+                all_whs = set()
+                for child_code, _req in children:
+                    wmap = {}
+                    for b in frappe.get_all("Bin", filters={"item_code": child_code},
+                                            fields=["warehouse", "actual_qty"]):
+                        wmap[b.warehouse] = wmap.get(b.warehouse, 0) + (b.actual_qty or 0)
+                        all_whs.add(b.warehouse)
+                    child_stock[child_code] = wmap
+                # Strict per-branch: a branch can build a kit only if EVERY child has
+                # enough there. A child missing / zero in a branch makes it yield 0.
+                for wh in all_whs:
+                    buildable = min(
+                        (int(child_stock[c].get(wh, 0) // req) if child_stock[c].get(wh, 0) > 0 else 0)
+                        for c, req in children
+                    ) if children else 0
+                    if buildable > 0:
+                        warehouse_stock_map[wh] = buildable
 
             else:
                 bins = frappe.get_all(
@@ -1884,25 +1885,32 @@ def clear_sync_hash_and_run_item_sync(item_code: str):
         run_item_sync(item_code=item_code, enqueue=True)
 
 def get_erp_stock_total(item_code):
-    """Total ERP stock. For a Product Bundle (no own Bin), derive it exactly like
-    the sync push: per-warehouse min over children with stock, summed."""
+    """Total ERP stock. For a Product Bundle (no own Bin): compute buildable kits
+    per branch — MIN over children of floor(child stock in that branch / qty),
+    a child missing/zero in a branch => 0 there — then SUM the branches."""
     bundle_name = frappe.db.get_value("Product Bundle", {"new_item_code": item_code}, "name")
     if not bundle_name:
         bins = frappe.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
         return int(sum(b.actual_qty for b in bins))
     bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
-    warehouse_stock_map = {}
-    for bi in bundle_doc.items:
-        required_qty = bi.qty or 1
-        for b in frappe.get_all("Bin", filters={"item_code": bi.item_code}, fields=["warehouse", "actual_qty"]):
-            if b.actual_qty <= 0:
-                continue
-            possible = int(b.actual_qty // required_qty)
-            warehouse_stock_map[b.warehouse] = (
-                possible if b.warehouse not in warehouse_stock_map
-                else min(warehouse_stock_map[b.warehouse], possible)
-            )
-    return int(sum(v for v in warehouse_stock_map.values() if v > 0))
+    children = [(bi.item_code, (bi.qty or 1)) for bi in bundle_doc.items]
+    if not children:
+        return 0
+    child_stock = {}
+    all_whs = set()
+    for code, _req in children:
+        wmap = {}
+        for b in frappe.get_all("Bin", filters={"item_code": code}, fields=["warehouse", "actual_qty"]):
+            wmap[b.warehouse] = wmap.get(b.warehouse, 0) + (b.actual_qty or 0)
+            all_whs.add(b.warehouse)
+        child_stock[code] = wmap
+    total = 0
+    for wh in all_whs:
+        total += min(
+            (int(child_stock[c].get(wh, 0) // req) if child_stock[c].get(wh, 0) > 0 else 0)
+            for c, req in children
+        )
+    return int(total)
 
     
 def expand_years(text: str):

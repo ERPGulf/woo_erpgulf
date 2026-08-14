@@ -518,21 +518,29 @@ def compute_bundle_stock_map(bundle_children_map):
     child_stock = get_stock_map(child_codes)
     out = {}
     for bcode, kids in bundle_children_map.items():
-        wh_map = {}
+        if not kids:
+            out[bcode] = {"_total": 0.0}
+            continue
+        all_whs = set()
         for kid in kids:
-            qty = kid.get("qty") or 1
-            if qty <= 0:
-                qty = 1
-            cs = child_stock.get(kid["item_code"], {})
-            for wh, avail in cs.items():
-                if wh == "_total":
-                    continue
-                if not avail or avail <= 0:
-                    continue
-                possible = int(avail // qty)
-                wh_map[wh] = possible if wh not in wh_map else min(wh_map[wh], possible)
-        row = {wh: float(v) for wh, v in wh_map.items() if v > 0}
-        row["_total"] = float(sum(v for v in wh_map.values() if v > 0))
+            for wh in child_stock.get(kid["item_code"], {}):
+                if wh != "_total":
+                    all_whs.add(wh)
+        row = {}
+        for wh in all_whs:
+            # Strict per-branch: every child must have enough in this branch, else 0.
+            buildable = None
+            for kid in kids:
+                req = kid.get("qty") or 1
+                if req <= 0:
+                    req = 1
+                avail = child_stock.get(kid["item_code"], {}).get(wh, 0) or 0
+                q = int(avail // req) if avail > 0 else 0
+                buildable = q if buildable is None else min(buildable, q)
+            buildable = buildable or 0
+            if buildable > 0:
+                row[wh] = float(buildable)
+        row["_total"] = float(sum(row.values()))
         out[bcode] = row
     return out
 
