@@ -44,7 +44,7 @@ PRICE_LIST        = None
 WOO_ID_FIELD      = "woocommerce_id"     # Item custom field holding Woo id (display only)
 
 # Safety cap for live paging. 100 products per page -> 30 pages = 3000 products.
-MAX_WOO_PAGES     = 50
+MAX_WOO_PAGES     = 60
 PRICE_TOLERANCE   = 0.01                 # treat price diffs below this as equal
 API_TIMEOUT       = 30                   # seconds per Woo API call
 
@@ -185,7 +185,11 @@ def get_data(filters, items, warehouses):
 
     price_map = get_price_map(codes)
     stock_map = get_stock_map(codes)
+    bundle_children_map = get_bundle_children_map(codes)              # KIT bundles
+    bundle_stock_map = compute_bundle_stock_map(bundle_children_map)  # derived stock
+    bundle_set = set(bundle_stock_map.keys())
     compat_map = get_erp_compat_map(codes)
+
     # items that have any Item WooCommerce Server row (needed for the "no server" reason)
     server_parents = {r["parent"] for r in frappe.get_all(
         "Item WooCommerce Server", filters={"parent": ["in", codes]}, fields=["parent"])} if codes else set()
@@ -207,7 +211,9 @@ def get_data(filters, items, warehouses):
         sku = it["item_code"]
         erp_name = it.get("custom_woo_name__arabic") or it.get("item_name") or ""
         erp_price = price_map.get(sku)
-        st = stock_map.get(sku, {})
+        is_bundle = sku in bundle_set
+        # Bundles keep no own Bin stock -> use derived (per-branch min over children, summed)
+        st = bundle_stock_map.get(sku, {}) if is_bundle else stock_map.get(sku, {})
         erp_stock = st.get("_total", 0.0)
 
         woo_list = woo_map.get(sku) or []
@@ -471,6 +477,63 @@ def get_stock_map(codes):
         q = r.get("actual_qty") or 0.0
         d[r["warehouse"]] = d.get(r["warehouse"], 0.0) + q
         d["_total"] += q
+    return out
+
+
+def get_bundle_children_map(codes):
+    """{bundle_item_code: [{"item_code":.., "qty":..}, ...]} for ERPNext Product Bundles."""
+    if not codes:
+        return {}
+    bundles = frappe.get_all(
+        "Product Bundle",
+        filters={"new_item_code": ["in", codes]},
+        fields=["name", "new_item_code"],
+    )
+    if not bundles:
+        return {}
+    names = [b["name"] for b in bundles]
+    child_rows = frappe.get_all(
+        "Product Bundle Item",
+        filters={"parent": ["in", names]},
+        fields=["parent", "item_code", "qty"],
+        order_by="parent asc, idx asc",
+    )
+    by_parent = {}
+    for r in child_rows:
+        by_parent.setdefault(r["parent"], []).append(
+            {"item_code": r["item_code"], "qty": (r.get("qty") or 1)}
+        )
+    return {b["new_item_code"]: by_parent.get(b["name"], []) for b in bundles}
+
+
+def compute_bundle_stock_map(bundle_children_map):
+    """Derived buyable stock per bundle, reproducing woocommerce_fusion sync_items.py:
+       per warehouse = min over children that HAVE stock there of floor(qty / line_qty);
+       _total (what the sync pushes as stock_quantity) = sum of per-branch values > 0."""
+    if not bundle_children_map:
+        return {}
+    child_codes = sorted({
+        kid["item_code"] for kids in bundle_children_map.values() for kid in kids
+    })
+    child_stock = get_stock_map(child_codes)
+    out = {}
+    for bcode, kids in bundle_children_map.items():
+        wh_map = {}
+        for kid in kids:
+            qty = kid.get("qty") or 1
+            if qty <= 0:
+                qty = 1
+            cs = child_stock.get(kid["item_code"], {})
+            for wh, avail in cs.items():
+                if wh == "_total":
+                    continue
+                if not avail or avail <= 0:
+                    continue
+                possible = int(avail // qty)
+                wh_map[wh] = possible if wh not in wh_map else min(wh_map[wh], possible)
+        row = {wh: float(v) for wh, v in wh_map.items() if v > 0}
+        row["_total"] = float(sum(v for v in wh_map.values() if v > 0))
+        out[bcode] = row
     return out
 
 

@@ -769,6 +769,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
 
         # 🏷 Sync Branch-wise Stock dynamically (Normal + Bundle Support)
+        warehouse_stock_map = {}
         try:
             meta_data = {}
             bundle_name = frappe.db.get_value(
@@ -834,12 +835,19 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
         
         try:
-            bins = frappe.get_all(
-                "Bin",
-                filters={"item_code": item.item.item_code},
-                fields=["actual_qty"]
-            )
-            total_qty = sum([b.actual_qty for b in bins])
+            if frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code}):
+                # Bundle: no own Bin stock. Reuse the per-branch qty derived above
+                # (min over children of actual_qty // required_qty) so the top-line
+                # stock matches the branch_stock numbers already pushed to Woo.
+                total_qty = sum(v for v in warehouse_stock_map.values() if v > 0)
+            else:
+                bins = frappe.get_all(
+                    "Bin",
+                    filters={"item_code": item.item.item_code},
+                    fields=["actual_qty"]
+                )
+                total_qty = sum([b.actual_qty for b in bins])
+                
 
             if total_qty > 0:
                 stock_status = "instock"
@@ -1874,6 +1882,28 @@ def clear_sync_hash_and_run_item_sync(item_code: str):
 
     if len(iwss) > 0:
         run_item_sync(item_code=item_code, enqueue=True)
+
+def get_erp_stock_total(item_code):
+    """Total ERP stock. For a Product Bundle (no own Bin), derive it exactly like
+    the sync push: per-warehouse min over children with stock, summed."""
+    bundle_name = frappe.db.get_value("Product Bundle", {"new_item_code": item_code}, "name")
+    if not bundle_name:
+        bins = frappe.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
+        return int(sum(b.actual_qty for b in bins))
+    bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
+    warehouse_stock_map = {}
+    for bi in bundle_doc.items:
+        required_qty = bi.qty or 1
+        for b in frappe.get_all("Bin", filters={"item_code": bi.item_code}, fields=["warehouse", "actual_qty"]):
+            if b.actual_qty <= 0:
+                continue
+            possible = int(b.actual_qty // required_qty)
+            warehouse_stock_map[b.warehouse] = (
+                possible if b.warehouse not in warehouse_stock_map
+                else min(warehouse_stock_map[b.warehouse], possible)
+            )
+    return int(sum(v for v in warehouse_stock_map.values() if v > 0))
+
     
 def expand_years(text: str):
     results = []
@@ -2127,8 +2157,7 @@ def verify_woo_match(log_name):
     )
     erp_price = price_doc[0].price_list_rate if price_doc else 0.0
 
-    bins = frappe.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
-    erp_stock = int(sum(b.actual_qty for b in bins))
+    erp_stock = get_erp_stock_total(item_code)
 
     def get_wc_meta(key):
         for m in wc.get("meta_data", []):
@@ -2266,8 +2295,7 @@ def verify_item_woo_match(item_code):
     )
     erp_price = price_doc[0].price_list_rate if price_doc else 0.0
 
-    bins = frappe.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
-    erp_stock = int(sum(b.actual_qty for b in bins))
+    erp_stock = get_erp_stock_total(item_code)
 
     def get_wc_meta(key):
         for m in wc.get("meta_data", []):
