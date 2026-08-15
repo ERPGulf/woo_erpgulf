@@ -212,6 +212,8 @@ def get_data(filters, items, warehouses):
         erp_name = it.get("custom_woo_name__arabic") or it.get("item_name") or ""
         erp_price = price_map.get(sku)
         is_bundle = sku in bundle_set
+        if filters.get("only_bundles") and not is_bundle:
+            continue
         # Bundles keep no own Bin stock -> use derived (per-branch min over children, summed)
         st = bundle_stock_map.get(sku, {}) if is_bundle else stock_map.get(sku, {})
         erp_stock = st.get("_total", 0.0)

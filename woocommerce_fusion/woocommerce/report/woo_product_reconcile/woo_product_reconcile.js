@@ -37,6 +37,12 @@ frappe.query_reports["Woo Product Reconcile"] = {
             default: 1,
         },
         {
+            fieldname: "only_bundles",
+            label: __("Bundles only"),
+            fieldtype: "Check",
+            default: 0,
+        },
+        {
             fieldname: "include_disabled",
             label: __("Include disabled items"),
             fieldtype: "Check",

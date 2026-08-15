@@ -1781,14 +1781,15 @@ class SynchroniseItem(SynchroniseWooCommerce):
             self.push_wc_product(product_id, meta=meta)
             # frappe.log_error("Kit Options Synced", f"Kit: {item.item.item_code}, Rows: {valid_rows}")
 
-            # ── Push part_of_kit to each CHILD product ──
+            # ── Push part_of_kit + option type/pack size to each CHILD product ──
             for row in valid_rows:
-                # frappe.log_error("Kit Options: Pushing to child", f"wc_id={row['wc_id']}, parent_id={product_id}")
                 self.push_wc_product(
                     row["wc_id"],
                     meta={
                         "part_of_kit":  str(product_id),
-                        "_part_of_kit": "field_part_of_kit"
+                        "_part_of_kit": "field_part_of_kit",
+                        "kit_option_type": row.get("type") or "",          # English: Bundle / Pair / Pair & Bundle / ""
+                        "kit_option_pack_size": str(row.get("pack_size") or 0),
                     }
                 )
 
