@@ -637,3 +637,71 @@ def compare_price(erp_price, woo_price):
     if erp_price is None or woo_price is None:
         return "—"
     return "✓" if abs(float(erp_price) - float(woo_price)) <= PRICE_TOLERANCE else "✗"
+
+
+# =====================================================================
+# Vehicle fitment rebuild — triggers the WooCommerce site to rebuild the
+# fitment index + vehicles.csv + lookup. Read-only on ERP; the only write
+# is a POST to the store's own REST endpoint (Application Password auth).
+# =====================================================================
+WOO_SYNC_IDLE_SECONDS = 300   # a Woo bulk sync is "running" if a log row was written in the last 5 min
+
+
+def _wp_conf():
+    """WP Application Password creds from site_config.json (NOT the WooCommerce keys)."""
+    url = (frappe.conf.get("mrkbatx_wp_url") or "").rstrip("/")
+    return url, frappe.conf.get("mrkbatx_wp_app_user"), frappe.conf.get("mrkbatx_wp_app_pass")
+
+
+@frappe.whitelist()
+def is_woo_sync_running():
+    """True if a Woo bulk sync looks active (newest Woo Sync Log row < 5 min old)."""
+    last = frappe.db.get_value("Woo Sync Log", {}, "creation", order_by="creation desc")
+    if not last:
+        return {"running": False, "idle_seconds": None}
+    secs = frappe.utils.time_diff_in_seconds(frappe.utils.now_datetime(), frappe.utils.get_datetime(last))
+    return {"running": secs < WOO_SYNC_IDLE_SECONDS, "idle_seconds": int(secs)}
+
+
+@frappe.whitelist()
+def is_fitment_rebuild_running():
+    """Ask the WooCommerce site whether a fitment rebuild is in progress."""
+    url, user, pw = _wp_conf()
+    if not (url and user and pw):
+        return {"running": False, "configured": False,
+                "error": "WP app-password creds not set in site_config.json"}
+    try:
+        r = requests.get(f"{url}/wp-json/erpgulf/v1/rebuild-status", auth=(user, pw), timeout=15)
+        r.raise_for_status()
+        data = r.json() or {}
+        data["configured"] = True
+        return data
+    except Exception as e:
+        return {"running": False, "configured": True, "error": str(e)}
+
+
+@frappe.whitelist()
+def rebuild_woo_fitments(csv=1, lookup=1):
+    """Queue a full fitment rebuild on the store (table + vehicles.csv + lookup).
+    Refuses while a Woo sync is still running so the two never collide."""
+    sync = is_woo_sync_running()
+    if sync.get("running"):
+        frappe.throw("A WooCommerce sync is still running (last activity %ss ago). "
+                     "Let it finish, then rebuild." % sync.get("idle_seconds"))
+    url, user, pw = _wp_conf()
+    if not (url and user and pw):
+        frappe.throw("WordPress app-password creds missing. Add mrkbatx_wp_url / "
+                     "mrkbatx_wp_app_user / mrkbatx_wp_app_pass to site_config.json.")
+    try:
+        r = requests.post(f"{url}/wp-json/erpgulf/v1/rebuild-fitments", auth=(user, pw),
+                          json={"csv": bool(int(csv)), "lookup": bool(int(lookup))}, timeout=30)
+    except Exception as e:
+        frappe.throw("Could not reach WooCommerce: %s" % e)
+    if r.status_code == 409:
+        return {"queued": False, "running": True, "message": "A rebuild is already running on WooCommerce."}
+    if r.status_code not in (200, 202):
+        frappe.throw("WooCommerce returned %s: %s" % (r.status_code, r.text[:300]))
+    try:
+        return r.json()
+    except Exception:
+        return {"queued": True, "running": True, "message": "Rebuild queued."}

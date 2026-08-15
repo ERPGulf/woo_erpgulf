@@ -105,6 +105,40 @@ frappe.query_reports["Woo Product Reconcile"] = {
         });
         $btn.addClass("btn-primary");
 
+        // ---- Rebuild Vehicle Fitment (triggers WooCommerce to rebuild fitment + vehicles.csv) ----
+        const RECON = "woocommerce_fusion.woocommerce.report.woo_product_reconcile.woo_product_reconcile";
+        report.page.add_inner_button(__("Rebuild Vehicle Fitment"), function () {
+            frappe.confirm(
+                __("Rebuild the fitment index and regenerate vehicles.csv on the store? Runs in the background."),
+                function () {
+                    frappe.call({
+                        method: RECON + ".rebuild_woo_fitments",
+                        args: { csv: 1, lookup: 1 },
+                        freeze: true,
+                        freeze_message: __("Starting fitment rebuild…"),
+                        callback: function (r) {
+                            frappe.show_alert({
+                                message: ((r && r.message && r.message.message) || __("Fitment rebuild started.")),
+                                indicator: "blue",
+                            }, 8);
+                            const t = setInterval(function () {
+                                frappe.call({
+                                    method: RECON + ".is_fitment_rebuild_running",
+                                    callback: function (rr) {
+                                        const st = (rr && rr.message) || {};
+                                        if (st.running) return;
+                                        clearInterval(t);
+                                        const msg = (st.result && st.result.message) || __("done");
+                                        frappe.show_alert({ message: __("Fitment rebuild finished: {0}", [msg]), indicator: "green" }, 10);
+                                    },
+                                });
+                            }, 10000);
+                        },
+                    });
+                }
+            );
+        });
+
         frappe.realtime.on("wc_bulk_sync_complete", function () {
             $btn.text(defaultLabel).prop("disabled", false).removeClass("disabled");
             frappe.show_alert({ message: __("WooCommerce sync finished."), indicator: "green" }, 7);
