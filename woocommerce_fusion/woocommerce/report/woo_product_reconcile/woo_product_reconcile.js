@@ -117,22 +117,38 @@ frappe.query_reports["Woo Product Reconcile"] = {
                         freeze: true,
                         freeze_message: __("Starting fitment rebuild…"),
                         callback: function (r) {
-                            frappe.show_alert({
-                                message: ((r && r.message && r.message.message) || __("Fitment rebuild started.")),
-                                indicator: "blue",
-                            }, 8);
+                            const started = (r && r.message) || {};
+                            if (started.queued === false && started.running === false) {
+                                frappe.msgprint(started.message || __("Could not start rebuild."));
+                                return;
+                            }
+                            const TITLE = __("Vehicle Fitment Rebuild");
+                            frappe.show_progress(TITLE, 1, 100, __("Starting…"));
+                            let done = false;
                             const t = setInterval(function () {
                                 frappe.call({
                                     method: RECON + ".is_fitment_rebuild_running",
                                     callback: function (rr) {
                                         const st = (rr && rr.message) || {};
-                                        if (st.running) return;
+                                        if (st.running) {
+                                            frappe.show_progress(TITLE, st.percent || 1, 100, st.phase || __("Working…"));
+                                            return;
+                                        }
+                                        if (done) return;
+                                        done = true;
                                         clearInterval(t);
-                                        const msg = (st.result && st.result.message) || __("done");
-                                        frappe.show_alert({ message: __("Fitment rebuild finished: {0}", [msg]), indicator: "green" }, 10);
+                                        frappe.show_progress(TITLE, 100, 100, __("Done"));
+                                        setTimeout(frappe.hide_progress, 800);
+                                        const res = (st.result && st.result.message) || __("done");
+                                        const ok = !st.result || st.result.success !== false;
+                                        frappe.msgprint({
+                                            title: __("Fitment rebuild finished"),
+                                            indicator: ok ? "green" : "red",
+                                            message: res,
+                                        });
                                     },
                                 });
-                            }, 10000);
+                            }, 3000);
                         },
                     });
                 }
