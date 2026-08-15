@@ -647,10 +647,11 @@ def compare_price(erp_price, woo_price):
 WOO_SYNC_IDLE_SECONDS = 300   # a Woo bulk sync is "running" if a log row was written in the last 5 min
 
 
-def _wp_conf():
-    """WP Application Password creds from site_config.json (NOT the WooCommerce keys)."""
-    url = (frappe.conf.get("mrkbatx_wp_url") or "").rstrip("/")
-    return url, frappe.conf.get("mrkbatx_wp_app_user"), frappe.conf.get("mrkbatx_wp_app_pass")
+def _wp_base_and_auth():
+    """Reuse the enabled WooCommerce Server's URL + consumer key/secret (the same
+    creds woocommerce_fusion already syncs with). No separate app password needed."""
+    base, key, sec, _plist = _get_woo_server()
+    return base, key, sec
 
 
 @frappe.whitelist()
@@ -666,12 +667,9 @@ def is_woo_sync_running():
 @frappe.whitelist()
 def is_fitment_rebuild_running():
     """Ask the WooCommerce site whether a fitment rebuild is in progress."""
-    url, user, pw = _wp_conf()
-    if not (url and user and pw):
-        return {"running": False, "configured": False,
-                "error": "WP app-password creds not set in site_config.json"}
     try:
-        r = requests.get(f"{url}/wp-json/erpgulf/v1/rebuild-status", auth=(user, pw), timeout=15)
+        base, key, sec = _wp_base_and_auth()
+        r = requests.get(f"{base}/wp-json/erpgulf/v1/rebuild-status", auth=(key, sec), timeout=15)
         r.raise_for_status()
         data = r.json() or {}
         data["configured"] = True
@@ -688,12 +686,9 @@ def rebuild_woo_fitments(csv=1, lookup=1):
     if sync.get("running"):
         frappe.throw("A WooCommerce sync is still running (last activity %ss ago). "
                      "Let it finish, then rebuild." % sync.get("idle_seconds"))
-    url, user, pw = _wp_conf()
-    if not (url and user and pw):
-        frappe.throw("WordPress app-password creds missing. Add mrkbatx_wp_url / "
-                     "mrkbatx_wp_app_user / mrkbatx_wp_app_pass to site_config.json.")
+    base, key, sec = _wp_base_and_auth()
     try:
-        r = requests.post(f"{url}/wp-json/erpgulf/v1/rebuild-fitments", auth=(user, pw),
+        r = requests.post(f"{base}/wp-json/erpgulf/v1/rebuild-fitments", auth=(key, sec),
                           json={"csv": bool(int(csv)), "lookup": bool(int(lookup))}, timeout=30)
     except Exception as e:
         frappe.throw("Could not reach WooCommerce: %s" % e)
@@ -705,3 +700,4 @@ def rebuild_woo_fitments(csv=1, lookup=1):
         return r.json()
     except Exception:
         return {"queued": True, "running": True, "message": "Rebuild queued."}
+        
