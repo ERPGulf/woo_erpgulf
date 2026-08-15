@@ -245,10 +245,11 @@ def get_data(filters, items, warehouses):
         erp_compat = compat_map.get(sku, "")
         woo_compat = woo_compat_summary(woo)
 
+        note = sync_reason(it, erp_price, sku in server_parents)
         row = {
             "sku": sku,
             "diff_on": diff_on,
-            "sync_note": sync_reason(it, erp_price, sku in server_parents),
+            "sync_note": note,
             "erp_name": erp_name,
             "woo_name": woo_name,
             "erp_compat": erp_compat,
@@ -264,6 +265,7 @@ def get_data(filters, items, warehouses):
             "woo_id": woo_id or it.get("woo_id") or "",
             "woo_matches": len(woo_list),
             "can_sync": 1 if diff_on else 0,   # ERP item that differs -> syncable
+            "erp_syncable": 0 if note else 1,  # ERP item, nothing blocking a push (matched or not)
         }
         wb = woo_branch_stock(woo)
         for wh in warehouses:
@@ -300,6 +302,7 @@ def get_data(filters, items, warehouses):
                 "woo_id": woo.get("id"),
                 "woo_matches": len(wlist),
                 "can_sync": 0,   # no ERP item -> can't push ERP->Woo
+                "erp_syncable": 0,
             }
             wb = woo_branch_stock(woo)
             for wh in warehouses:

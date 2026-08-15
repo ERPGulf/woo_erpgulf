@@ -82,16 +82,18 @@ frappe.query_reports["Woo Product Reconcile"] = {
     ],
 
     onload: function (report) {
-        const defaultLabel = __("Sync mismatched to Woo");
+        const defaultLabel = __("Sync shown to Woo");
         const $btn = report.page.add_inner_button(defaultLabel, function () {
             const rows = frappe.query_report.data || [];
-            const skus = rows.filter(r => r.can_sync).map(r => r.sku);
+            // Sync every ERP row currently shown (matched or not; skips blocked + Woo-only).
+            // "Only mismatches" ticked -> view is just diffs; unticked -> everything shown.
+            const skus = [...new Set(rows.filter(r => r.erp_syncable).map(r => r.sku).filter(Boolean))];
             if (!skus.length) {
-                frappe.msgprint(__("No mismatched items to sync (run/rebuild the report first)."));
+                frappe.msgprint(__("No syncable rows shown (rebuild the report first)."));
                 return;
             }
             frappe.confirm(
-                __("Push {0} mismatched item(s) from ERPNext to WooCommerce? This writes to the LIVE store.", [skus.length]),
+                __("Push {0} item(s) shown from ERPNext to WooCommerce? This writes to the LIVE store.", [skus.length]),
                 function () {
                     frappe.call({
                         method: "woocommerce_fusion.tasks.sync_items.bulk_run_item_sync",
