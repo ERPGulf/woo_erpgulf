@@ -697,7 +697,34 @@ def rebuild_woo_fitments(csv=1, lookup=1):
     if r.status_code not in (200, 202):
         frappe.throw("WooCommerce returned %s: %s" % (r.status_code, r.text[:300]))
     try:
-        return r.json()
+        payload = r.json()
     except Exception:
-        return {"queued": True, "running": True, "message": "Rebuild queued."}
-        
+        payload = {"queued": True, "running": True, "message": "Rebuild queued."}
+    # Record the outcome even if the user closes the browser: a background worker
+    # polls the store until the rebuild finishes and logs it to the Error Log.
+    frappe.enqueue(
+        "woocommerce_fusion.woocommerce.report.woo_product_reconcile.woo_product_reconcile.watch_fitment_rebuild",
+        queue="long", timeout=2400, now=False,
+    )
+    return payload
+
+
+def watch_fitment_rebuild():
+    """Runs on an ERP worker (not the browser). Polls the store until the fitment
+    rebuild finishes, then records the result in the Error Log for an audit trail."""
+    import time
+    deadline = time.time() + 1800  # 30 min ceiling
+    while time.time() < deadline:
+        time.sleep(15)
+        st = is_fitment_rebuild_running() or {}
+        if st.get("error"):
+            frappe.log_error("Woo Fitment Rebuild", "Status check failed: %s" % st.get("error"))
+            return
+        if not st.get("running"):
+            res = st.get("result") or {}
+            msg = res.get("message") or "done"
+            ok = res.get("success", True)
+            frappe.log_error("Woo Fitment Rebuild",
+                             ("Finished (OK): " if ok else "Finished (FAILED): ") + str(msg))
+            return
+    frappe.log_error("Woo Fitment Rebuild", "Timed out waiting for rebuild to finish (30 min).")
