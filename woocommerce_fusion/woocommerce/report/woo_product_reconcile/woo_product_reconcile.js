@@ -34,7 +34,7 @@ frappe.query_reports["Woo Product Reconcile"] = {
             fieldname: "only_mismatches",
             label: __("Only mismatches"),
             fieldtype: "Check",
-            default: 0,
+            default: 1,
         },
         {
             fieldname: "include_disabled",
@@ -65,6 +65,7 @@ frappe.query_reports["Woo Product Reconcile"] = {
             label: __("Verified"),
             fieldtype: "Select",
             options: "\nYes\nNo",
+            default: "Yes"
         },
         {
             fieldname: "f_universal",

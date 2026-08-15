@@ -540,7 +540,17 @@ def compute_bundle_stock_map(bundle_children_map):
             buildable = buildable or 0
             if buildable > 0:
                 row[wh] = float(buildable)
-        row["_total"] = float(sum(row.values()))
+        # Overall stock must match woosb (company-wide): min over children of
+        # floor(total child stock / qty). Per-branch values above match branch_stock.
+        comp = None
+        for kid in kids:
+            req = kid.get("qty") or 1
+            if req <= 0:
+                req = 1
+            tot = child_stock.get(kid["item_code"], {}).get("_total", 0) or 0
+            q = int(tot // req) if tot > 0 else 0
+            comp = q if comp is None else min(comp, q)
+        row["_total"] = float(comp or 0)
         out[bcode] = row
     return out
 

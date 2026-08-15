@@ -837,10 +837,9 @@ class SynchroniseItem(SynchroniseWooCommerce):
         
         try:
             if frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code}):
-                # Bundle: no own Bin stock. Reuse the per-branch qty derived above
-                # (min over children of actual_qty // required_qty) so the top-line
-                # stock matches the branch_stock numbers already pushed to Woo.
-                total_qty = sum(v for v in warehouse_stock_map.values() if v > 0)
+                # Bundle top-line = company-wide buildable (what woosb shows on the
+                # storefront). Per-branch numbers go to branch_stock separately.
+                total_qty = get_erp_stock_total(item.item.item_code)
             else:
                 bins = frappe.get_all(
                     "Bin",
@@ -1167,6 +1166,9 @@ class SynchroniseItem(SynchroniseWooCommerce):
                         }
                 if woosb_ids:
                     self._tracked_push(product_id, "woosb_ids", meta=[{"key": "woosb_ids", "value": woosb_ids}])
+                # Use the bundle's OWN (ERP) price, not the woosb children-sum.
+                self._tracked_push(product_id, "woosb_fixed_price",
+                                   meta={"woosb_disable_auto_price": "on"})
             except Exception as e:
                 frappe.log_error("woosb_ids rebuild failed", str(e))
 
@@ -1885,32 +1887,24 @@ def clear_sync_hash_and_run_item_sync(item_code: str):
         run_item_sync(item_code=item_code, enqueue=True)
 
 def get_erp_stock_total(item_code):
-    """Total ERP stock. For a Product Bundle (no own Bin): compute buildable kits
-    per branch — MIN over children of floor(child stock in that branch / qty),
-    a child missing/zero in a branch => 0 there — then SUM the branches."""
+    """Total ERP stock. For a Product Bundle: COMPANY-WIDE buildable count =
+    min over children of floor(total child stock / qty) — the same number woosb
+    shows on the storefront. (Per-branch branch_stock is computed separately.)"""
     bundle_name = frappe.db.get_value("Product Bundle", {"new_item_code": item_code}, "name")
     if not bundle_name:
         bins = frappe.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
         return int(sum(b.actual_qty for b in bins))
     bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
-    children = [(bi.item_code, (bi.qty or 1)) for bi in bundle_doc.items]
-    if not children:
-        return 0
-    child_stock = {}
-    all_whs = set()
-    for code, _req in children:
-        wmap = {}
-        for b in frappe.get_all("Bin", filters={"item_code": code}, fields=["warehouse", "actual_qty"]):
-            wmap[b.warehouse] = wmap.get(b.warehouse, 0) + (b.actual_qty or 0)
-            all_whs.add(b.warehouse)
-        child_stock[code] = wmap
-    total = 0
-    for wh in all_whs:
-        total += min(
-            (int(child_stock[c].get(wh, 0) // req) if child_stock[c].get(wh, 0) > 0 else 0)
-            for c, req in children
-        )
-    return int(total)
+    best = None
+    for bi in bundle_doc.items:
+        req = bi.qty or 1
+        if req <= 0:
+            req = 1
+        total = sum((b.actual_qty or 0) for b in frappe.get_all(
+            "Bin", filters={"item_code": bi.item_code}, fields=["actual_qty"]))
+        q = int(total // req) if total > 0 else 0
+        best = q if best is None else min(best, q)
+    return int(best or 0)
 
     
 def expand_years(text: str):
