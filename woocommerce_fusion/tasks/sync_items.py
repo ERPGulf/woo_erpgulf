@@ -193,7 +193,13 @@ class ERPNextItemToSync:
 
     @property
     def item_woocommerce_server(self):
+        # Match the child row by its idx VALUE (robust against un-normalised idx
+        # from imports), falling back to positional lookup.
+        for s in self.item.woocommerce_servers:
+            if s.idx == self.item_woocommerce_server_idx:
+                return s
         return self.item.woocommerce_servers[self.item_woocommerce_server_idx - 1]
+        
 
 class SynchroniseItem(SynchroniseWooCommerce):
     """
