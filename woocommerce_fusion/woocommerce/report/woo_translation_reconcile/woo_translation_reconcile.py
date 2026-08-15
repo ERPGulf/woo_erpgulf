@@ -92,3 +92,44 @@ def get_data(filters):
             continue
         out.append(r)
     return out
+
+
+# ─────────────────────────────────────────────────────────────────
+# Translate action — kick off an AI translate batch on WooCommerce
+# for the untranslated products (background + progress).
+# ─────────────────────────────────────────────────────────────────
+
+@frappe.whitelist()
+def translate_untranslated(sku=None, limit=50):
+    if requests is None:
+        frappe.throw(_("The 'requests' library is not available on this bench."))
+    base, key, sec = _get_woo_server()
+    try:
+        r = requests.post(
+            base + "/wp-json/erpgulf/v1/translate-run",
+            params={"sku": sku or "", "limit": int(limit or 50)},
+            auth=(key, sec), timeout=60,
+        )
+    except Exception as e:
+        frappe.throw(_("Could not reach WooCommerce: {0}").format(e))
+    if r.status_code == 409:
+        return {"queued": False, "running": True, "message": "A translate batch is already running."}
+    if r.status_code not in (200, 202):
+        frappe.throw(_("WooCommerce returned {0}: {1}").format(r.status_code, r.text[:300]))
+    try:
+        return r.json()
+    except Exception:
+        return {"queued": True, "running": True, "message": "Translate queued."}
+
+
+@frappe.whitelist()
+def is_translation_running():
+    if requests is None:
+        return {"running": False, "error": "requests not available"}
+    try:
+        base, key, sec = _get_woo_server()
+        r = requests.get(base + "/wp-json/erpgulf/v1/translate-status", auth=(key, sec), timeout=30)
+        r.raise_for_status()
+        return r.json() or {}
+    except Exception as e:
+        return {"running": False, "error": str(e)}
