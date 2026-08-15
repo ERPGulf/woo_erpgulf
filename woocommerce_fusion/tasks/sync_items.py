@@ -570,7 +570,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             wc_product = frappe.get_doc({
                 "doctype": "WooCommerce Product",
                 "type": "woosb",
-                "woocommerce_name": ((bundle_doc.description or "").strip() or clean_name)[:140],
+                "woocommerce_name": (clean_name or "")[:140],
                 "woocommerce_server": item.item_woocommerce_server.woocommerce_server,
                 # "woocommerce_id": wc_product_id,
                 "regular_price": item.item.standard_rate or 0,
@@ -658,15 +658,11 @@ class SynchroniseItem(SynchroniseWooCommerce):
         clean_name=item.item.custom_woo_name__arabic
         if not clean_name:
             clean_name = self.clean_product_name(raw_name)
-        if wc_product.woocommerce_name != clean_name and not is_bundle:
+        # Use the item's Arabic Woo name for ALL products (bundles included) so the
+        # data-entry team maintains one field (custom_woo_name__arabic) everywhere.
+        if wc_product.woocommerce_name != clean_name[:140]:
             wc_product.woocommerce_name = clean_name[:140]
             wc_product_dirty = True
-        if is_bundle:
-            bundle_name = frappe.db.get_value("Product Bundle", {"new_item_code": item.item.item_code}, "name")
-            if bundle_name and wc_product.woocommerce_name !=bundle_name:
-                bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
-                wc_product.woocommerce_name = ((bundle_doc.description or "").strip() or clean_name)[:140]
-                wc_product_dirty = True
                 
         # short_slug = self.clean_slug(wc_product.woocommerce_name)
         # wc_product.slug = short_slug
