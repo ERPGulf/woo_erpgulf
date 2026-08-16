@@ -1703,6 +1703,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 side      = row.get("custom_side") or row.get("side") or ""
                 opt_type  = row.get("custom_type") or row.get("type") or ""
                 pack_size = row.get("custom_pack_size") or row.get("pack_size") or 0
+                qty       = row.get("qty") or 0
 
                 wc_id = frappe.db.get_value(
                     "Item WooCommerce Server",
@@ -1729,6 +1730,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                     "side":      side,
                     "type":      opt_type,
                     "pack_size": int(pack_size) if pack_size else 0,
+                    "qty":       int(qty) if qty else 0,
                 })
 
             if not valid_rows:
@@ -1771,6 +1773,8 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 meta[f"_kit_variants_{idx}_option_side"]     = "field_kit_variant_side"
                 meta[f"kit_variants_{idx}_option_pack_size"]  = str(row["pack_size"]) if row["pack_size"] else ""
                 meta[f"_kit_variants_{idx}_option_pack_size"] = "field_kit_variant_pack_size"
+                meta[f"kit_variants_{idx}_qty"]  = str(row["qty"]) if row.get("qty") else ""
+                meta[f"_kit_variants_{idx}_qty"] = "field_kit_variant_qty"
                 meta[f"kit_variants_{idx}_variant_product"]  = str(row["wc_id"])
                 meta[f"_kit_variants_{idx}_variant_product"] = "field_kit_variant_product"
                 meta[f"kit_variants_{idx}_option_type"]  = type_ar.get(row["type"], row["type"])
