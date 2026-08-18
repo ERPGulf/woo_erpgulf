@@ -1,4 +1,4 @@
-// Pricing Rule list view — adds "Sync Promotion to Woo" to the Actions menu.
+// Pricing Rule list view — adds a "Sync Promotion to Woo" button.
 // Ships with the app (no manual Client Script needed).
 // Register in hooks.py:  doctype_list_js = {"Pricing Rule": "public/js/pricing_rule_list.js"}
 // Place at:  woocommerce_fusion/public/js/pricing_rule_list.js
@@ -14,10 +14,12 @@ frappe.listview_settings['Pricing Rule'] = frappe.listview_settings['Pricing Rul
             try { prev_onload(listview); } catch (e) { /* noop */ }
         }
 
-        listview.page.add_action_item(__('Sync Promotion to Woo'), function () {
-            const names = listview.get_checked_items(true);   // selected docnames only
-            if (!names || !names.length) {
-                frappe.msgprint(__('Select one or more Pricing Rules first.'));
+        // Always-visible toolbar button (top of the list, next to List View / Actions)
+        listview.page.add_inner_button(__('Sync Promotion to Woo'), function () {
+            const items = listview.get_checked_items() || [];
+            const names = items.map(function (d) { return d.name; });
+            if (!names.length) {
+                frappe.msgprint(__('Tick one or more Pricing Rules first, then click Sync Promotion to Woo.'));
                 return;
             }
             frappe.call({
