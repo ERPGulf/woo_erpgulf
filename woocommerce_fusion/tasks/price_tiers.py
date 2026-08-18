@@ -148,16 +148,19 @@ def _items_for_rules(names):
             doc = frappe.get_doc("Pricing Rule", rule_name)
         except Exception:
             continue
-        for row in (doc.get("items") or []):
-            if row.get("item_code"):
-                codes.add(row["item_code"])
+                for row in (doc.get("items") or []):
+            ic = row.get("item_code")
+            if ic:
+                codes.add(ic)
         for row in (doc.get("item_groups") or []):
-            if row.get("item_group"):
-                for it in frappe.get_all("Item", filters={"item_group": row["item_group"], "disabled": 0}, fields=["item_code"]):
+            ig = row.get("item_group")
+            if ig:
+                for it in frappe.get_all("Item", filters={"item_group": ig, "disabled": 0}, fields=["item_code"]):
                     codes.add(it["item_code"])
         for row in (doc.get("brands") or []):
-            if row.get("brand"):
-                for it in frappe.get_all("Item", filters={"brand": row["brand"], "disabled": 0}, fields=["item_code"]):
+            br = row.get("brand")
+            if br:
+                for it in frappe.get_all("Item", filters={"brand": br, "disabled": 0}, fields=["item_code"]):
                     codes.add(it["item_code"])
     return codes
 
