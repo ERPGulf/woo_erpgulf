@@ -110,6 +110,8 @@ def get_columns(warehouses):
         {"label": _("Woo name"),        "fieldname": "woo_name",    "fieldtype": "Data",     "width": 200},
         {"label": _("ERP compat"),      "fieldname": "erp_compat",  "fieldtype": "Data",     "width": 220},
         {"label": _("Woo compat"),      "fieldname": "woo_compat",  "fieldtype": "Data",     "width": 220},
+        {"label": _("ERP kit opts"),    "fieldname": "erp_kit_opts","fieldtype": "Data",     "width": 90},
+        {"label": _("Woo kit opts"),    "fieldname": "woo_kit_opts","fieldtype": "Data",     "width": 90},
     ]
     # ---- per branch: ERP qty (black) next to Woo qty (blue) ----
     for wh in warehouses:
@@ -179,6 +181,61 @@ def get_branch_warehouses(codes, filters):
         whs = [w for w in whs if w not in groups]
     return whs
 
+def get_bundle_kit_option_counts(codes):
+    """{bundle_item_code: expected kit_variants count} — mirrors
+    sync_items.sync_kit_options: a Product Bundle Item counts only if it has any of
+    position/side/type/pack_size set AND its child item has a woocommerce_id."""
+    if not codes:
+        return {}
+    bundles = frappe.get_all(
+        "Product Bundle",
+        filters={"new_item_code": ["in", codes]},
+        fields=["name", "new_item_code"],
+    )
+    if not bundles:
+        return {}
+    name_to_code = {b["name"]: b["new_item_code"] for b in bundles}
+    child_rows = frappe.get_all(
+        "Product Bundle Item",
+        filters={"parent": ["in", list(name_to_code.keys())]},
+        fields=["parent", "item_code", "custom_position", "custom_side",
+                "custom_type", "custom_pack_size"],
+        order_by="parent asc, idx asc",
+    )
+    child_codes = sorted({r["item_code"] for r in child_rows})
+    child_wc = {}
+    if child_codes:
+        for w in frappe.get_all(
+            "Item WooCommerce Server",
+            filters={"parent": ["in", child_codes]},
+            fields=["parent", "woocommerce_id"],
+        ):
+            if w.get("woocommerce_id") and w["parent"] not in child_wc:
+                child_wc[w["parent"]] = str(w["woocommerce_id"])
+    out = {}
+    for r in child_rows:
+        code = name_to_code.get(r["parent"])
+        if not code:
+            continue
+        has_opt = any([
+            (r.get("custom_position") or ""),
+            (r.get("custom_side") or ""),
+            (r.get("custom_type") or ""),
+            (r.get("custom_pack_size") or 0),
+        ])
+        if not has_opt or not child_wc.get(r["item_code"]):
+            continue
+        out[code] = out.get(code, 0) + 1
+    return out
+
+
+def woo_kit_variants_count(woo):
+    """Number of kit option rows Woo currently has (ACF 'kit_variants' meta)."""
+    meta = _woo_meta(woo)
+    try:
+        return int(meta.get("kit_variants") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 def get_data(filters, items, warehouses):
     codes = [i["item_code"] for i in items]
@@ -189,6 +246,7 @@ def get_data(filters, items, warehouses):
     bundle_stock_map = compute_bundle_stock_map(bundle_children_map)  # derived stock
     bundle_set = set(bundle_stock_map.keys())
     compat_map = get_erp_compat_map(codes)
+    kit_expected_map = get_bundle_kit_option_counts(codes)   # bundle -> expected kit_variants
 
     # items that have any Item WooCommerce Server row (needed for the "no server" reason)
     server_parents = {r["parent"] for r in frappe.get_all(
@@ -245,6 +303,11 @@ def get_data(filters, items, warehouses):
         erp_compat = compat_map.get(sku, "")
         woo_compat = woo_compat_summary(woo)
 
+        erp_kit_opts = kit_expected_map.get(sku, 0)
+        woo_kit_opts = woo_kit_variants_count(woo) if woo else 0
+        if is_bundle and erp_kit_opts != woo_kit_opts:
+            diff_on = (diff_on + " + " if diff_on else "") + _("Kit options")
+
         note = sync_reason(it, erp_price, sku in server_parents)
         row = {
             "sku": sku,
@@ -254,6 +317,8 @@ def get_data(filters, items, warehouses):
             "woo_name": woo_name,
             "erp_compat": erp_compat,
             "woo_compat": woo_compat,
+            "erp_kit_opts": erp_kit_opts if is_bundle else "",
+            "woo_kit_opts": woo_kit_opts if is_bundle else "",
             "erp_stock": erp_stock,
             "woo_stock": woo_stock_disp,
             "stock_match": stock_match,
