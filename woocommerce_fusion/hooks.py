@@ -6,7 +6,6 @@ app_email = "dirk@finfoot.work"
 app_license = "GNU GPLv3"
 
 
-
 # include js in doctype views
 doctype_js = {"Sales Order": "public/js/selling/sales_order.js", 
               "Item": "public/js/stock/item.js",
@@ -14,6 +13,8 @@ doctype_js = {"Sales Order": "public/js/selling/sales_order.js",
               "Woo Verification Log": "woocommerce_fusion/doctype/woo_verification_log/woo_verification_log.js",
               "Woocommerce Customer": "woocommerce/doctype/woocommerce_customer/woocommerce_customer.js"
             }
+
+doctype_list_js = {"Pricing Rule": "public/js/pricing_rule_list.js"}
 doctype_list_js = {
     "Sales Order": "public/js/selling/sales_order_list.js",
     "Item": "public/js/stock/item_list.js",
