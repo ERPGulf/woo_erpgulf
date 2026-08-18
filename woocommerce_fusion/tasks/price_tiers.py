@@ -148,7 +148,7 @@ def _items_for_rules(names):
             doc = frappe.get_doc("Pricing Rule", rule_name)
         except Exception:
             continue
-                for row in (doc.get("items") or []):
+        for row in (doc.get("items") or []):
             ic = row.get("item_code")
             if ic:
                 codes.add(ic)
