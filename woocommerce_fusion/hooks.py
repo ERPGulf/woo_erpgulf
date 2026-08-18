@@ -14,12 +14,12 @@ doctype_js = {"Sales Order": "public/js/selling/sales_order.js",
               "Woocommerce Customer": "woocommerce/doctype/woocommerce_customer/woocommerce_customer.js"
             }
 
-doctype_list_js = {"Pricing Rule": "public/js/pricing_rule_list.js"}
 doctype_list_js = {
     "Sales Order": "public/js/selling/sales_order_list.js",
     "Item": "public/js/stock/item_list.js",
     "Woo Sync Log": "woocommerce_fusion/doctype/woo_sync_log/woo_sync_log_list.js",
-    "Woo Verification Log": "woocommerce_fusion/doctype/woo_verification_log/woo_verification_log_list.js"
+    "Woo Verification Log": "woocommerce_fusion/doctype/woo_verification_log/woo_verification_log_list.js",
+	"Pricing Rule": "public/js/pricing_rule_list.js"
 }
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
