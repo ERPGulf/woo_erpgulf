@@ -80,9 +80,10 @@ def build_promo_row(item_code, item_group=None, brand=None):
             "is_cumulative": 0,
             "coupon_code_based": 0,
         },
-        fields=["rate_or_discount", "rate", "discount_percentage",
+                fields=["rate_or_discount", "rate", "discount_percentage",
                 "min_qty", "max_qty", "min_amt", "max_amt",
-                "applicable_for", "currency", "valid_from", "valid_upto"],
+                "applicable_for", "currency", "valid_from", "valid_upto",
+                "rule_description", "promotional_scheme_id"],
     )
     if not rules:
         return None
@@ -106,13 +107,20 @@ def build_promo_row(item_code, item_group=None, brand=None):
         mx = int(r.get("max_qty") or 0)
         if mn <= 0 and mx <= 0:
             continue                                      # not a qty-break rule
-        if r.get("rate_or_discount") == "Rate" and r.get("rate"):
+                if r.get("rate_or_discount") == "Rate" and r.get("rate"):
             price = float(r["rate"])
+            # PACK row (Max Qty = 0): Rate holds the WHOLE-PACK price -> store per-unit.
+            if mx <= 0 and mn > 0:
+                price = price / mn
         elif r.get("rate_or_discount") == "Discount Percentage" and r.get("discount_percentage") and base:
             price = round(base * (1 - float(r["discount_percentage"]) / 100.0), 2)
         else:
             continue
-        tiers.append({"min": mn if mn > 0 else 1, "max": (mx if mx > 0 else None), "price": price})
+                label = (r.get("rule_description") or "").strip()
+        if not label and r.get("promotional_scheme_id"):
+            label = (frappe.db.get_value("Promotional Scheme Price Discount",
+                                         r["promotional_scheme_id"], "rule_description") or "").strip()
+        tiers.append({"min": mn if mn > 0 else 1, "max": (mx if mx > 0 else None), "price": price, "label": label})
         if r.get("valid_from"):
             vfroms.append(str(r["valid_from"])[:10])
         if r.get("valid_upto"):
