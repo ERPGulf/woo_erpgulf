@@ -83,7 +83,7 @@ def build_promo_row(item_code, item_group=None, brand=None):
                 fields=["rate_or_discount", "rate", "discount_percentage",
                 "min_qty", "max_qty", "min_amt", "max_amt",
                 "applicable_for", "currency", "valid_from", "valid_upto",
-                "rule_description", "promotional_scheme_id"],
+                "rule_description", "promotional_scheme_id", "promotional_scheme"],
     )
     if not rules:
         return None
@@ -116,10 +116,20 @@ def build_promo_row(item_code, item_group=None, brand=None):
             price = round(base * (1 - float(r["discount_percentage"]) / 100.0), 2)
         else:
             continue
+                # Label (BOX/CARTON) lives on the Promotional Scheme slab, not the rule.
+        # Try, in order: the rule's own field, the linked slab by id, then match
+        # the slab by scheme + min/max qty (survives id-linking quirks).
         label = (r.get("rule_description") or "").strip()
         if not label and r.get("promotional_scheme_id"):
             label = (frappe.db.get_value("Promotional Scheme Price Discount",
                                          r["promotional_scheme_id"], "rule_description") or "").strip()
+        if not label and r.get("promotional_scheme"):
+            label = (frappe.db.get_value(
+                "Promotional Scheme Price Discount",
+                {"parent": r["promotional_scheme"],
+                 "min_qty": r.get("min_qty") or 0,
+                 "max_qty": r.get("max_qty") or 0},
+                "rule_description") or "").strip()
         tiers.append({"min": mn if mn > 0 else 1, "max": (mx if mx > 0 else None), "price": price, "label": label})
         if r.get("valid_from"):
             vfroms.append(str(r["valid_from"])[:10])
