@@ -107,7 +107,7 @@ def build_promo_row(item_code, item_group=None, brand=None):
         mx = int(r.get("max_qty") or 0)
         if mn <= 0 and mx <= 0:
             continue                                      # not a qty-break rule
-                if r.get("rate_or_discount") == "Rate" and r.get("rate"):
+        if r.get("rate_or_discount") == "Rate" and r.get("rate"):
             price = float(r["rate"])
             # PACK row (Max Qty = 0): Rate holds the WHOLE-PACK price -> store per-unit.
             if mx <= 0 and mn > 0:
@@ -116,7 +116,7 @@ def build_promo_row(item_code, item_group=None, brand=None):
             price = round(base * (1 - float(r["discount_percentage"]) / 100.0), 2)
         else:
             continue
-                label = (r.get("rule_description") or "").strip()
+        label = (r.get("rule_description") or "").strip()
         if not label and r.get("promotional_scheme_id"):
             label = (frappe.db.get_value("Promotional Scheme Price Discount",
                                          r["promotional_scheme_id"], "rule_description") or "").strip()
