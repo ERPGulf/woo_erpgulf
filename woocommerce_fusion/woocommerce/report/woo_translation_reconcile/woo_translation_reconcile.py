@@ -60,6 +60,8 @@ def get_columns():
         {"label": _("Compat rows"),       "fieldname": "ar_compat", "fieldtype": "Int",  "width": 90},
         {"label": _("AR id"),             "fieldname": "ar_id",     "fieldtype": "Data", "width": 80},
         {"label": _("EN id"),             "fieldname": "en_id",     "fieldtype": "Data", "width": 80},
+        {"label": _("EN compat"), "fieldname": "en_compat", "fieldtype": "Int",  "width": 90},
+        {"label": _("Promo"),     "fieldname": "promo",     "fieldtype": "Data", "width": 90},
     ]
 
 
