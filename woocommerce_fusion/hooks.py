@@ -100,32 +100,14 @@ override_doctype_class = {
 # 	}
 # }
 doc_events = {
-	# "Stock Entry": {
-	# 	"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	# 	"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	# },
-	# "Stock Reconciliation": {
-	# 	"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	# 	"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	# },
-	# "Sales Invoice": {
-	# 	"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	# 	"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	# },
-	# "Delivery Note": {
-	# 	"on_submit": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	# 	"on_cancel": "woocommerce_fusion.tasks.stock_update.update_stock_levels_for_woocommerce_item",
-	# },
-	# "Item Price": {
-	# 	"on_update": "woocommerce_fusion.tasks.sync_item_prices.update_item_price_for_woocommerce_item_from_hook"
-	# },
-	# "Sales Order": {
-	# 	"on_submit": "woocommerce_fusion.tasks.sync_sales_orders.run_sales_order_sync_from_hook"
-	# },
-	# "Item": {
-	# 	"on_update": "woocommerce_fusion.tasks.sync_items.run_item_sync_from_hook",
-	# 	"after_insert": "woocommerce_fusion.tasks.sync_items.run_item_sync_from_hook",
-	# },
+	"Item Price": {
+		"on_update":    "woocommerce_fusion.tasks.auto_push.on_item_price",
+		"after_insert": "woocommerce_fusion.tasks.auto_push.on_item_price",
+		"on_trash":     "woocommerce_fusion.tasks.auto_push.on_item_price",
+	},
+	"Stock Ledger Entry": {
+		"after_insert": "woocommerce_fusion.tasks.auto_push.on_stock_ledger_entry",
+	},
 }
 
 # Scheduled Tasks
