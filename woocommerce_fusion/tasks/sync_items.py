@@ -770,85 +770,22 @@ class SynchroniseItem(SynchroniseWooCommerce):
             self._tracked_push(product_id, "attributes", attributes=wc_attributes)
 
 
-        # 🏷 Sync Branch-wise Stock dynamically (Normal + Bundle Support)
-        warehouse_stock_map = {}
+                # 🏷 Branch-wise stock — only mapped web branches, strict per-branch
         try:
+            branch_qty = _branch_qty_map(item.item.item_code)
             meta_data = {}
-            bundle_name = frappe.db.get_value(
-                "Product Bundle",
-                {"new_item_code": item.item.item_code},
-                "name"
-            )
-            warehouse_stock_map = {}
-            if bundle_name:
-                bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
-                children = [(bi.item_code, (bi.qty or 1)) for bi in bundle_doc.items]
-                # Per-branch stock of each child + every branch any child touches.
-                child_stock = {}
-                all_whs = set()
-                for child_code, _req in children:
-                    wmap = {}
-                    for b in frappe.get_all("Bin", filters={"item_code": child_code},
-                                            fields=["warehouse", "actual_qty"]):
-                        wmap[b.warehouse] = wmap.get(b.warehouse, 0) + (b.actual_qty or 0)
-                        all_whs.add(b.warehouse)
-                    child_stock[child_code] = wmap
-                # Strict per-branch: a branch can build a kit only if EVERY child has
-                # enough there. A child missing / zero in a branch makes it yield 0.
-                for wh in all_whs:
-                    buildable = min(
-                        (int(child_stock[c].get(wh, 0) // req) if child_stock[c].get(wh, 0) > 0 else 0)
-                        for c, req in children
-                    ) if children else 0
-                    if buildable > 0:
-                        warehouse_stock_map[wh] = buildable
-
-            else:
-                bins = frappe.get_all(
-                    "Bin",
-                    filters={"item_code": item.item.item_code},
-                    fields=["warehouse", "actual_qty"]
-                )
-                for b in bins:
-                    if b.actual_qty > 0:
-                        warehouse_stock_map[b.warehouse] = int(b.actual_qty)
-            branch_entries = [
-                (warehouse, qty)
-                for warehouse, qty in warehouse_stock_map.items()
-                if qty > 0
-            ]
-            for index, (warehouse, qty) in enumerate(branch_entries):
-                branch_name = (
-                    warehouse
-                    .lower()
-                    .replace("warehouse", "")
-                    .replace(" - ame", "")
-                    .strip()
-                    .replace(" ", "-") + "-branch"
-                )
-                meta_data[f"branch_stock_{index}_branch"] = branch_name
+            for index, (slug, qty) in enumerate(branch_qty.items()):
+                meta_data[f"branch_stock_{index}_branch"] = slug
                 meta_data[f"branch_stock_{index}_stock_qty"] = int(qty)
-            meta_data["branch_stock"] = len(branch_entries)
-            if meta_data:
-                self._tracked_push(product_id, "branch_stock", meta=meta_data)
-            else:
-                frappe.log_error("No Branch Stock Found", item.item.item_code)
+            meta_data["branch_stock"] = len(branch_qty)
+            self._tracked_push(product_id, "branch_stock", meta=meta_data)
         except Exception as e:
             frappe.log_error("Branch Stock Sync Failed", str(e))
 
         
         try:
-            if frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code}):
-                # Bundle top-line = company-wide buildable (what woosb shows on the
-                # storefront). Per-branch numbers go to branch_stock separately.
-                total_qty = get_erp_stock_total(item.item.item_code)
-            else:
-                bins = frappe.get_all(
-                    "Bin",
-                    filters={"item_code": item.item.item_code},
-                    fields=["actual_qty"]
-                )
-                total_qty = sum([b.actual_qty for b in bins])
+                        # Headline = sum of mapped web branches (kits: strict per-branch)
+            total_qty = get_erp_stock_total(item.item.item_code)
                 
 
             if total_qty > 0:
@@ -1893,25 +1830,57 @@ def clear_sync_hash_and_run_item_sync(item_code: str):
     if len(iwss) > 0:
         run_item_sync(item_code=item_code, enqueue=True)
 
-def get_erp_stock_total(item_code):
-    """Total ERP stock. For a Product Bundle: COMPANY-WIDE buildable count =
-    min over children of floor(total child stock / qty) — the same number woosb
-    shows on the storefront. (Per-branch branch_stock is computed separately.)"""
+# ── Web-branch mapping: ERP warehouse -> Woo branch slug (others ignored) ──
+WAREHOUSE_TO_BRANCH = {
+    "Riyadh warehouse - AME":   "riyadh-1-branch",   # Masif
+    "Riyadh 2 warehouse - AME": "riyadh-2-branch",   # Duraihimyah
+    "Jeddah Warehouse - AME":   "jeddah-branch",
+    "Khobar Warehouse - AME":   "khobar-branch",
+    "Dammam Warehouse - AME":   "dammam-branch",
+}
+
+def _norm_wh(w):
+    # collapse double / non-breaking spaces so ERP names match reliably
+    return " ".join((w or "").replace("\xa0", " ").split())
+
+def _branch_qty_map(item_code):
+    """{branch_slug: qty} using ONLY the mapped web branches.
+    Simple item: sum of positive Bin qty per branch.
+    Bundle: strict per-branch buildable = min over components of
+    floor(component qty in that branch / required qty)."""
     bundle_name = frappe.db.get_value("Product Bundle", {"new_item_code": item_code}, "name")
+    result = {}
     if not bundle_name:
-        bins = frappe.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
-        return int(sum(b.actual_qty for b in bins))
+        for b in frappe.get_all("Bin", filters={"item_code": item_code},
+                                fields=["warehouse", "actual_qty"]):
+            slug = WAREHOUSE_TO_BRANCH.get(_norm_wh(b.warehouse))
+            if slug and (b.actual_qty or 0) > 0:
+                result[slug] = result.get(slug, 0) + int(b.actual_qty)
+        return result
     bundle_doc = frappe.get_doc("Product Bundle", bundle_name)
-    best = None
-    for bi in bundle_doc.items:
-        req = bi.qty or 1
-        if req <= 0:
-            req = 1
-        total = sum((b.actual_qty or 0) for b in frappe.get_all(
-            "Bin", filters={"item_code": bi.item_code}, fields=["actual_qty"]))
-        q = int(total // req) if total > 0 else 0
-        best = q if best is None else min(best, q)
-    return int(best or 0)
+    children = [(bi.item_code, int(bi.qty or 1) or 1) for bi in bundle_doc.items]
+    comp = {}
+    for code, req in children:
+        m = {}
+        for b in frappe.get_all("Bin", filters={"item_code": code},
+                                fields=["warehouse", "actual_qty"]):
+            slug = WAREHOUSE_TO_BRANCH.get(_norm_wh(b.warehouse))
+            if slug and (b.actual_qty or 0) > 0:
+                m[slug] = m.get(slug, 0) + int(b.actual_qty)
+        comp[code] = m
+    for slug in set(WAREHOUSE_TO_BRANCH.values()):
+        buildable = None
+        for code, req in children:
+            avail = comp.get(code, {}).get(slug, 0)
+            q = avail // req if req else 0
+            buildable = q if buildable is None else min(buildable, q)
+        if buildable and buildable > 0:
+            result[slug] = int(buildable)
+    return result
+
+def get_erp_stock_total(item_code):
+    """Sellable total for Woo = sum over the mapped web branches only."""
+    return int(sum(_branch_qty_map(item_code).values()))
 
     
 def expand_years(text: str):
