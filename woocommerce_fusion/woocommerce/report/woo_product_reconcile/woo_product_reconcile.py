@@ -116,6 +116,7 @@ def get_columns(branches):
         {"label": _("Woo compat"),      "fieldname": "woo_compat",  "fieldtype": "Data",     "width": 220},
         {"label": _("ERP kit opts"),    "fieldname": "erp_kit_opts","fieldtype": "Data",     "width": 90},
         {"label": _("Woo kit opts"),    "fieldname": "woo_kit_opts","fieldtype": "Data",     "width": 90},
+        {"label": _("Kit children"),    "fieldname": "kit_children","fieldtype": "Data",     "width": 140},
     ]
     # ---- per branch: ERP qty (black) next to Woo qty (blue) ----
     for slug in branches:
@@ -251,6 +252,7 @@ def get_data(filters, items, branches):
     bundle_set = set(bundle_stock_map.keys())
     compat_map = get_erp_compat_map(codes)
     kit_expected_map = get_bundle_kit_option_counts(codes)   # bundle -> expected kit_variants
+    kit_children_map = get_bundle_children_status(codes)     # bundle -> child sync status
 
     # items that have any Item WooCommerce Server row (needed for the "no server" reason)
     server_parents = {r["parent"] for r in frappe.get_all(
@@ -312,6 +314,10 @@ def get_data(filters, items, branches):
         woo_kit_opts = woo_kit_variants_count(woo) if woo else 0
         if is_bundle and erp_kit_opts != woo_kit_opts:
             diff_on = (diff_on + " + " if diff_on else "") + _("Kit options")
+        if is_bundle:
+            _kc = kit_children_map.get(sku)
+            if _kc and _kc.get("missing"):
+                diff_on = (diff_on + " + " if diff_on else "") + _("Kit child missing")
 
         note = sync_reason(it, erp_price, sku in server_parents)
         row = {
@@ -324,6 +330,7 @@ def get_data(filters, items, branches):
             "woo_compat": woo_compat,
             "erp_kit_opts": erp_kit_opts if is_bundle else "",
             "woo_kit_opts": woo_kit_opts if is_bundle else "",
+            "kit_children": _kit_children_label(kit_children_map.get(sku)) if is_bundle else "",
             "erp_stock": erp_stock,
             "woo_stock": woo_stock_disp,
             "stock_match": stock_match,
@@ -803,3 +810,39 @@ def watch_fitment_rebuild():
                              ("Finished (OK): " if ok else "Finished (FAILED): ") + str(msg))
             return
     frappe.log_error("Woo Fitment Rebuild", "Timed out waiting for rebuild to finish (30 min).")
+def get_bundle_children_status(codes):
+    """{bundle_code: {"total": n, "synced": m, "missing": [child_codes]}}.
+    A child counts as synced if it has an Item WooCommerce Server row with a woocommerce_id."""
+    kids_map = get_bundle_children_map(codes)
+    if not kids_map:
+        return {}
+    all_children = sorted({k["item_code"] for kids in kids_map.values() for k in kids})
+    synced = set()
+    if all_children:
+        for w in frappe.get_all(
+            "Item WooCommerce Server",
+            filters={"parent": ["in", all_children], "woocommerce_id": ["is", "set"]},
+            fields=["parent"],
+        ):
+            synced.add(w["parent"])
+    out = {}
+    for bcode, kids in kids_map.items():
+        child_codes = [k["item_code"] for k in kids]
+        missing = [c for c in child_codes if c not in synced]
+        out[bcode] = {
+            "total": len(child_codes),
+            "synced": len(child_codes) - len(missing),
+            "missing": missing,
+        }
+    return out
+
+
+def _kit_children_label(st):
+    if not st or not st.get("total"):
+        return ""
+    if not st.get("missing"):
+        return "%d/%d \u2713" % (st["synced"], st["total"])
+    miss = ", ".join(st["missing"][:3])
+    if len(st["missing"]) > 3:
+        miss += " +%d" % (len(st["missing"]) - 3)
+    return "%d/%d \u2717 %s" % (st["synced"], st["total"], miss)
