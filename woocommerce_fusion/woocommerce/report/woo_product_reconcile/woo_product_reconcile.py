@@ -58,6 +58,10 @@ CHECK_FILTERS = {
 }
 # =====================================================================
 
+from woocommerce_fusion.tasks.sync_items import (
+    WAREHOUSE_TO_BRANCH, _branch_qty_map, get_erp_stock_total,
+)
+
 
 # credentials resolved once per report run
 _WOO_SERVER_CACHE = {}
@@ -90,9 +94,9 @@ def _get_woo_server():
 def execute(filters=None):
     filters = filters or {}
     items = get_items(filters)
-    warehouses = get_branch_warehouses([i["item_code"] for i in items], filters)
-    columns = get_columns(warehouses)
-    data = get_data(filters, items, warehouses)
+    branches = list(dict.fromkeys(WAREHOUSE_TO_BRANCH.values()))  # 5 web branch slugs, ordered
+    columns = get_columns(branches)
+    data = get_data(filters, items, branches)
     return columns, data
 
 
@@ -100,7 +104,7 @@ def wh_fieldname(wh):
     return "wh_" + frappe.scrub(wh)
 
 
-def get_columns(warehouses):
+def get_columns(branches):
     # ERP columns (black) sit right next to their Woo counterpart (blue).
     cols = [
         {"label": _("SKU"),             "fieldname": "sku",         "fieldtype": "Data",     "width": 150},
@@ -114,11 +118,11 @@ def get_columns(warehouses):
         {"label": _("Woo kit opts"),    "fieldname": "woo_kit_opts","fieldtype": "Data",     "width": 90},
     ]
     # ---- per branch: ERP qty (black) next to Woo qty (blue) ----
-    for wh in warehouses:
-        cols.append({"label": wh + " (ERP)", "fieldname": "erpwh_" + frappe.scrub(wh), "fieldtype": "Float", "width": 115, "precision": 0})
-        cols.append({"label": wh + " (Woo)", "fieldname": "woowh_" + frappe.scrub(wh), "fieldtype": "Float", "width": 115, "precision": 0})
+    for slug in branches:
+        cols.append({"label": slug + " (ERP)", "fieldname": "erpbr_" + frappe.scrub(slug), "fieldtype": "Float", "width": 120, "precision": 0})
+        cols.append({"label": slug + " (Woo)", "fieldname": "woobr_" + frappe.scrub(slug), "fieldtype": "Float", "width": 120, "precision": 0})
     cols += [
-        {"label": _("ERP stock (all)"), "fieldname": "erp_stock",   "fieldtype": "Float",    "width": 100, "precision": 0},
+        {"label": _("ERP stock (branches)"), "fieldname": "erp_stock", "fieldtype": "Float", "width": 110, "precision": 0},
         {"label": _("Woo stock"),       "fieldname": "woo_stock",   "fieldtype": "Data",     "width": 90},
         {"label": _("Stock"),           "fieldname": "stock_match", "fieldtype": "Data",     "width": 60},
         {"label": _("ERP price"),       "fieldname": "erp_price",   "fieldtype": "Currency", "width": 100},
@@ -237,7 +241,7 @@ def woo_kit_variants_count(woo):
     except (TypeError, ValueError):
         return 0
 
-def get_data(filters, items, warehouses):
+def get_data(filters, items, branches):
     codes = [i["item_code"] for i in items]
 
     price_map = get_price_map(codes)
@@ -272,9 +276,10 @@ def get_data(filters, items, warehouses):
         is_bundle = sku in bundle_set
         if filters.get("only_bundles") and not is_bundle:
             continue
-        # Bundles keep no own Bin stock -> use derived (per-branch min over children, summed)
-        st = bundle_stock_map.get(sku, {}) if is_bundle else stock_map.get(sku, {})
-        erp_stock = st.get("_total", 0.0)
+                # ERP branch qtys + total come from the SAME functions the sync pushes with,
+        # so the report can't drift from Woo.
+        erp_branch = _branch_qty_map(sku)      # {branch_slug: qty} over the 5 web branches
+        erp_stock = get_erp_stock_total(sku)   # = sum of those branches
 
         woo_list = woo_map.get(sku) or []
         woo = woo_list[0] if woo_list else None
@@ -333,9 +338,9 @@ def get_data(filters, items, warehouses):
             "erp_syncable": 0 if note else 1,  # ERP item, nothing blocking a push (matched or not)
         }
         wb = woo_branch_stock(woo)
-        for wh in warehouses:
-            row["erpwh_" + frappe.scrub(wh)] = st.get(wh)
-            row["woowh_" + frappe.scrub(wh)] = wb.get(woo_branch_slug(wh))
+        for slug in branches:
+            row["erpbr_" + frappe.scrub(slug)] = erp_branch.get(slug)
+            row["woobr_" + frappe.scrub(slug)] = wb.get(slug)
 
         if only_mismatch and not diff_on:
             continue
@@ -370,9 +375,9 @@ def get_data(filters, items, warehouses):
                 "erp_syncable": 0,
             }
             wb = woo_branch_stock(woo)
-            for wh in warehouses:
-                r["erpwh_" + frappe.scrub(wh)] = None
-                r["woowh_" + frappe.scrub(wh)] = wb.get(woo_branch_slug(wh))
+            for slug in branches:
+                r["erpbr_" + frappe.scrub(slug)] = None
+                r["woobr_" + frappe.scrub(slug)] = wb.get(slug)
             rows.append(r)
 
     return rows

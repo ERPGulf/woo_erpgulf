@@ -774,10 +774,15 @@ class SynchroniseItem(SynchroniseWooCommerce):
         try:
             branch_qty = _branch_qty_map(item.item.item_code)
             meta_data = {}
-            for index, (slug, qty) in enumerate(branch_qty.items()):
+            slugs = list(branch_qty.items())
+            for index, (slug, qty) in enumerate(slugs):
                 meta_data[f"branch_stock_{index}_branch"] = slug
                 meta_data[f"branch_stock_{index}_stock_qty"] = int(qty)
-            meta_data["branch_stock"] = len(branch_qty)
+            # clear stale rows from a previous larger sync (old data had up to 7)
+            for index in range(len(slugs), 10):
+                meta_data[f"branch_stock_{index}_branch"] = ""
+                meta_data[f"branch_stock_{index}_stock_qty"] = "0"
+            meta_data["branch_stock"] = len(slugs)
             self._tracked_push(product_id, "branch_stock", meta=meta_data)
         except Exception as e:
             frappe.log_error("Branch Stock Sync Failed", str(e))
