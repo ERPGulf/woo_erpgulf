@@ -718,11 +718,11 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 			# Added before the VAT row so the printed breakdown reads Products -> Delivery -> VAT.
 			add_tax_details(
 				new_sales_order,
-				wc_order.shipping_total,
+				split_inclusive_shipping(wc_order)[0],
 				"Delivery Charges",
 				wc_server.f_n_f_account,
 			)
-			shipping_tax_total = float(wc_order.shipping_tax or 0)
+			shipping_tax_total = split_inclusive_shipping(wc_order)[1]
 
 		if use_actual_tax:
 			# One VAT row for the whole order: item VAT + delivery VAT, on the VAT output account
@@ -1054,6 +1054,26 @@ def add_tax_details(sales_order, price, desc, tax_account_head, rate=0):
 			"description": desc,
 		},
 	)
+
+
+def split_inclusive_shipping(wc_order):
+    """
+    Return (net, vat) for a WooCommerce order's delivery charge.
+
+    When WooCommerce reports no shipping tax, the shipping_total it sends is VAT-inclusive,
+    so it is split here. When WooCommerce does report shipping tax, its figures are trusted
+    and shipping_total is already net.
+    """
+    incl = float(wc_order.shipping_total or 0)
+    vat = float(wc_order.shipping_tax or 0)
+
+    if incl and not vat:
+        net = round(incl / (1 + VAT_RATE / 100), 2)
+        vat = round(incl - net, 2)
+    else:
+        net = incl
+
+    return net, vat
 
 
 def get_tax_inc_price_for_woocommerce_line_item(line_item: Dict):
