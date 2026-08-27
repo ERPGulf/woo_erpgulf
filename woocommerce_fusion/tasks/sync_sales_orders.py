@@ -697,8 +697,9 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 					# Trigger taxes calculation
 					new_sales_order.set_missing_lead_customer_details()
 				else:
-					ordered_items_tax = item.get("total_tax")
-					add_tax_details(new_sales_order, ordered_items_tax, "Ordered Item tax", wc_server.tax_account)
+					ordered_items_tax = float(item.get("total_tax") or 0)
+					if ordered_items_tax > 0:
+						add_tax_details(new_sales_order, ordered_items_tax, "Sales VAT 15 %  - ضريبة مبيعات", wc_server.tax_account)
 
 		# If a Shipping Rule is added, shipping charges will be determined by the Shipping Rule. If not, then
 		# get it from the WooCommerce Order
