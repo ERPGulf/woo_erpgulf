@@ -23,6 +23,11 @@ from woocommerce_fusion.woocommerce.woocommerce_api import (
 )
 
 
+# Standard KSA VAT rate. Stamped onto "Actual" VAT rows so that ERPNext writes a real
+# percentage into item_wise_tax_detail (a 0% / non-zero-amount pair fails ZATCA validation).
+VAT_RATE = 15.0
+
+
 def run_sales_order_sync_from_hook(doc, method):
 	if (
 		doc.doctype == "Sales Order"
@@ -637,6 +642,9 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 		if not wc_server.warehouse:
 			frappe.throw(_("Please set Warehouse in WooCommerce Server"))
 
+		use_actual_tax = bool(wc_server.enable_tax_lines_sync and wc_server.use_actual_tax_type)
+		items_tax_total = 0.0
+
 		for item in json.loads(wc_order.line_items):
 			woocomm_item_id = item.get("variation_id") or item.get("product_id")
 
@@ -690,26 +698,49 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 				new_sales_order_line,
 			)
 
-			if wc_server.enable_tax_lines_sync:
-				if not wc_server.use_actual_tax_type:
-					new_sales_order.taxes_and_charges = wc_server.sales_taxes_and_charges_template
+			# Accumulate item VAT. A single consolidated row is added after the loop so that
+			# ERPNext distributes it correctly across every line.
+			if use_actual_tax:
+				items_tax_total += float(item.get("total_tax") or 0)
 
-					# Trigger taxes calculation
-					new_sales_order.set_missing_lead_customer_details()
-				else:
-					ordered_items_tax = float(item.get("total_tax") or 0)
-					if ordered_items_tax > 0:
-						add_tax_details(new_sales_order, ordered_items_tax, "Sales VAT 15 %  - ضريبة مبيعات", wc_server.tax_account)
+		# Apply the Sales Taxes and Charges Template once, not once per line item
+		if wc_server.enable_tax_lines_sync and not wc_server.use_actual_tax_type:
+			new_sales_order.taxes_and_charges = wc_server.sales_taxes_and_charges_template
 
-		# If a Shipping Rule is added, shipping charges will be determined by the Shipping Rule. If not, then
-		# get it from the WooCommerce Order
+			# Trigger taxes calculation
+			new_sales_order.set_missing_lead_customer_details()
+
+		# If a Shipping Rule is added, shipping charges will be determined by the Shipping Rule.
+		# If not, then get it from the WooCommerce Order.
+		shipping_tax_total = 0.0
 		if not new_sales_order.shipping_rule:
-			add_tax_details(new_sales_order, wc_order.shipping_tax, "Shipping Tax", wc_server.f_n_f_account)
+			# Delivery charge, excluding VAT, to the freight income account.
+			# Added before the VAT row so the printed breakdown reads Products -> Delivery -> VAT.
 			add_tax_details(
 				new_sales_order,
 				wc_order.shipping_total,
-				"Shipping Total",
+				"Delivery Charges",
 				wc_server.f_n_f_account,
+			)
+			shipping_tax_total = float(wc_order.shipping_tax or 0)
+
+		if use_actual_tax:
+			# One VAT row for the whole order: item VAT + delivery VAT, on the VAT output account
+			add_tax_details(
+				new_sales_order,
+				items_tax_total + shipping_tax_total,
+				"Sales VAT 15 %  - ضريبة مبيعات",
+				wc_server.tax_account,
+				rate=VAT_RATE,
+			)
+		elif shipping_tax_total:
+			# Template path: the template covers item VAT, delivery VAT still needs its own row
+			add_tax_details(
+				new_sales_order,
+				shipping_tax_total,
+				"VAT on Delivery Charges",
+				wc_server.tax_account,
+				rate=VAT_RATE,
 			)
 
 		# Handle scenario where Woo Order has no items, then manually set the total
@@ -1002,13 +1033,24 @@ def create_contact(data, customer):
 	return contact
 
 
-def add_tax_details(sales_order, price, desc, tax_account_head):
+def add_tax_details(sales_order, price, desc, tax_account_head, rate=0):
+	"""
+	Append a row to the Sales Taxes and Charges table.
+
+	Rows that compute to zero are skipped. `rate` is stored on the row so ERPNext writes
+	the real tax percentage into item_wise_tax_detail.
+	"""
+	amount = float(price or 0)
+	if not amount:
+		return
+
 	sales_order.append(
 		"taxes",
 		{
 			"charge_type": "Actual",
 			"account_head": tax_account_head,
-			"tax_amount": price,
+			"tax_amount": amount,
+			"rate": rate,
 			"description": desc,
 		},
 	)
