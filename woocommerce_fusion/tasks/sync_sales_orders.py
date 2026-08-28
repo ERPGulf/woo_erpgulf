@@ -240,8 +240,8 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 			so_dirty = False
 
 			# Update the woocommerce_status field if necessary
-			wc_order_status = WC_ORDER_STATUS_MAPPING_REVERSE[woocommerce_order.status]
-			if sales_order.woocommerce_status != wc_order_status:
+			wc_order_status = WC_ORDER_STATUS_MAPPING_REVERSE.get(woocommerce_order.status)
+			if wc_order_status and sales_order.woocommerce_status != wc_order_status:
 				sales_order.woocommerce_status = wc_order_status
 				so_dirty = True
 
@@ -374,11 +374,11 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 
 		# Update the woocommerce_status field if necessary
 		sales_order_wc_status = (
-			WC_ORDER_STATUS_MAPPING[sales_order.woocommerce_status]
+			resolve_wc_status(sales_order)
 			if sales_order.woocommerce_status
 			else None
 		)
-		if sales_order_wc_status != wc_order.status:
+		if sales_order_wc_status and sales_order_wc_status != wc_order.status:
 			wc_order.status = sales_order_wc_status
 			wc_order_dirty = True
 
@@ -490,7 +490,7 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 		new_sales_order.po_no = new_sales_order.woocommerce_id = wc_order.id
 		new_sales_order.custom_woocommerce_customer_note = wc_order.customer_note
 
-		new_sales_order.woocommerce_status = WC_ORDER_STATUS_MAPPING_REVERSE[wc_order.status]
+		new_sales_order.woocommerce_status = WC_ORDER_STATUS_MAPPING_REVERSE.get(wc_order.status)
 		wc_server = frappe.get_cached_doc("WooCommerce Server", wc_order.woocommerce_server)
 
 		new_sales_order.woocommerce_server = wc_order.woocommerce_server
@@ -948,6 +948,30 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 
 		address.flags.ignore_mandatory = True
 		address.save()
+
+
+# ERPNext "Online Order Status" -> WooCommerce order status slug.
+# Anything not listed is slugified: "Ready for Pickup" -> "ready-for-pickup".
+ONLINE_ORDER_STATUS_TO_WC = {
+    "Ready for Pickup": "ready-for-pickup",
+}
+
+
+def resolve_wc_status(sales_order):
+    """
+    Which WooCommerce status this Sales Order should push.
+
+    custom_online_order_status (allow-on-submit) wins when set; otherwise fall back to
+    the woocommerce_status field the app already maintains.
+    """
+    online = (sales_order.get("custom_online_order_status") or "").strip()
+    if online:
+        return ONLINE_ORDER_STATUS_TO_WC.get(online) or online.lower().replace(" ", "-")
+
+    if sales_order.woocommerce_status:
+        return WC_ORDER_STATUS_MAPPING.get(sales_order.woocommerce_status)
+
+    return None
 
 
 def get_list_of_wc_orders(

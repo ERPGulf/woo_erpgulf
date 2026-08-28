@@ -100,6 +100,10 @@ override_doctype_class = {
 # 	}
 # }
 doc_events = {
+	"Sales Order": {
+		# Allow-on-submit fields (custom_online_order_status) fire this event, not on_update
+		"on_update_after_submit": "woocommerce_fusion.tasks.sync_sales_orders.run_sales_order_sync_from_hook",
+	},
 	"Item Price": {
 		"on_update":    "woocommerce_fusion.tasks.auto_push.on_item_price",
 		"after_insert": "woocommerce_fusion.tasks.auto_push.on_item_price",
