@@ -443,11 +443,10 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 			wc_order.status = sales_order_wc_status
 			wc_order_dirty = True
 
-		# Push every ERP-authored value: courier, tracking, ETA, invoice, approval
-		meta_push = build_wc_meta_push(wc_order, sales_order)
-		if meta_push:
-			wc_order.meta_data = json.dumps(meta_push)
-			wc_order_dirty = True
+		# Push every ERP-authored value: courier, tracking, ETA, invoice, approval.
+		# Sent straight to the REST API rather than through wc_order.save(), whose
+		# payload does not carry meta_data.
+		push_wc_order_meta(wc_order, build_wc_meta_push(wc_order, sales_order))
 
 		# Get the Item WooCommerce ID's
 		for so_item in sales_order.items:
@@ -1116,6 +1115,50 @@ def build_wc_meta_push(wc_order, sales_order):
     wanted["adv_invoice_date"] = inv_date
 
     return [{"key": k, "value": v} for k, v in wanted.items() if current.get(k, "") != v]
+
+
+def push_wc_order_meta(wc_order, rows):
+    """
+    Write order meta straight to the WooCommerce REST API.
+
+    The WooCommerce Order virtual doctype's save() does not include meta_data in
+    the payload it sends, so assigning wc_order.meta_data is accepted and then
+    silently discarded. This mirrors the direct-PUT approach already used for
+    products in sync_items.push_wc_product.
+
+    WooCommerce merges meta_data by key, so sending only changed rows is safe.
+    """
+    if not rows:
+        return False
+
+    import requests
+
+    server = frappe.get_cached_doc("WooCommerce Server", wc_order.woocommerce_server)
+    url = "{}/wp-json/wc/v3/orders/{}".format(
+        (server.woocommerce_server_url or "").rstrip("/"), wc_order.id
+    )
+
+    try:
+        resp = requests.put(
+            url,
+            auth=(server.api_consumer_key, server.api_consumer_secret),
+            json={"meta_data": rows},
+            timeout=(15, 60),
+        )
+        if resp.status_code not in (200, 201):
+            frappe.log_error(
+                "WooCommerce order meta push failed",
+                "HTTP {} for order {}\n{}".format(
+                    resp.status_code, wc_order.id, (resp.text or "")[:2000]
+                ),
+            )
+            return False
+        return True
+    except Exception:
+        frappe.log_error(
+            frappe.get_traceback(), "WooCommerce order meta push {}".format(wc_order.id)
+        )
+        return False
 
 
 def apply_wc_meta_to_sales_order(wc_order, sales_order):
