@@ -107,6 +107,10 @@ def sync_woocommerce_orders_modified_since(date_time_from=None):
 		)
 		raise ValueError(error_text)
 
+	# Stamp the cursor from before the fetch: an order modified while this run is in
+	# progress must be picked up next time, not skipped.
+	sync_started = now()
+
 	wc_orders = get_list_of_wc_orders(date_time_from=date_time_from)
 	wc_orders += get_list_of_wc_orders(date_time_from=date_time_from, status="trash")
 	for wc_order in wc_orders:
@@ -116,7 +120,13 @@ def sync_woocommerce_orders_modified_since(date_time_from=None):
 		except Exception:
 			pass
 
-	frappe.db.set_single_value("WooCommerce Settings", "wc_last_sync_date_items", now())
+	# Advance the cursor on the same Single and field it was read from. The original
+	# wrote "wc_last_sync_date_items" on "WooCommerce Settings" — a different doctype
+	# and a different field — so the cursor never moved and every run re-fetched the
+	# same window, growing without bound.
+	frappe.db.set_single_value(
+		"WooCommerce Integration Settings", "wc_last_sync_date", sync_started
+	)
 
 
 class SynchroniseSalesOrder(SynchroniseWooCommerce):
