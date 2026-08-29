@@ -34,7 +34,13 @@ def run_sales_order_sync_from_hook(doc, method):
 		and not doc.flags.get("created_by_sync", None)
 		and doc.woocommerce_server
 	):
-		frappe.enqueue(run_sales_order_sync, queue="long", sales_order_name=doc.name)
+		frappe.enqueue(
+			run_sales_order_sync,
+			queue="long",
+			sales_order_name=doc.name,
+			job_name="wc_so_sync_" + doc.name,
+			enqueue_after_commit=True,
+		)
 
 
 @frappe.whitelist()
