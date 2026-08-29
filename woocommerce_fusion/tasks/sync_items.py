@@ -1940,7 +1940,7 @@ def bulk_run_item_sync(items):
         fields=["name"]
     )
     for r in old_records:
-        frappe.delete_doc("DefaultValue", r.name, ignore_permissions=True)
+        frappe.db.delete("DefaultValue", {"name": r.name})
     if old_records:
         frappe.db.commit()
 
@@ -1952,7 +1952,10 @@ def bulk_run_item_sync(items):
     ]
 
     import json as _json
-    batch_id = frappe.utils.now().replace(" ", "_").replace(":", "-")
+    batch_id = "%s_%s" % (
+        frappe.utils.now().replace(" ", "_").replace(":", "-"),
+        frappe.generate_hash(length=6),
+    )
     cache_key = f"wc_bulk_sync_{user}_{batch_id}"
     frappe.db.set_default(
         cache_key,

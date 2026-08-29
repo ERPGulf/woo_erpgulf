@@ -1,8 +1,8 @@
 """
 Automatic ERPNext -> WooCommerce push for stock & price changes.
 
-Fires the SAME sync the "Sync shown to Woo" button uses
-(woocommerce_fusion.tasks.sync_items.bulk_run_item_sync), but automatically,
+Fires the same per-item sync the "Sync shown to Woo" button ultimately runs
+(woocommerce_fusion.tasks.sync_items.run_item_sync), but automatically,
 whenever a product's price or stock changes in ERPNext.
 
 Triggers (wired via hooks.py doc_events):
@@ -14,7 +14,7 @@ Design:
     edits for one item collapses into a SINGLE background push (no API hammering,
     never blocks the saving transaction).
   - enqueue_after_commit: only pushes once the DB change is actually committed.
-  - Reuses bulk_run_item_sync, so behaviour is identical to the manual button.
+    - Reuses run_item_sync, the same worker the manual button drives per item.
   - Kill switch: set  woo_autopush_disabled: 1  in site_config.json to turn off
     without removing code.
 
@@ -22,10 +22,14 @@ Place at:  woocommerce_fusion/tasks/auto_push.py
 Then add the doc_events block (see bottom of this file) to hooks.py and migrate.
 """
 
+import time
+
 import frappe
 
 DEBOUNCE_SEC = 90          # collapse repeated changes for one item into one push
 QUEUE = "long"             # background queue to run the push on
+MAX_ATTEMPTS = 3           # retry a failed push instead of dropping the item
+RETRY_DELAY_SEC = 5        # base back-off between attempts (5s, then 10s)
 
 
 def _enabled():
@@ -82,15 +86,34 @@ def _queue_push(item_code):
 
 
 def run_push(item_code):
-    """Background worker: push one item to Woo via the existing bulk sync."""
+    """Background worker: push one item to Woo via the single-item sync.
+
+    Uses run_item_sync (not bulk_run_item_sync) — the bulk entry point writes
+    shared batch-progress rows to tabDefaultValue keyed on the session user,
+    so concurrent auto-pushes deadlocked each other there and the item was
+    silently dropped. Retries on transient failures instead of giving up.
+    """
     frappe.cache().delete_value("woo_autopush:" + item_code)
     if not _enabled():
         return
-    try:
-        from woocommerce_fusion.tasks.sync_items import bulk_run_item_sync
-        bulk_run_item_sync(items=[item_code])
-    except Exception:
-        frappe.log_error(frappe.get_traceback(), "woo_autopush run_push %s" % item_code)
+
+    from woocommerce_fusion.tasks.sync_items import run_item_sync
+
+    last_error = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            run_item_sync(item_code=item_code, enqueue=False)
+            return
+        except Exception:
+            last_error = frappe.get_traceback()
+            frappe.db.rollback()
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(RETRY_DELAY_SEC * attempt)
+
+    frappe.log_error(
+        last_error,
+        "woo_autopush run_push %s (failed after %s attempts)" % (item_code, MAX_ATTEMPTS),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────
