@@ -247,6 +247,18 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 
 			if sales_order.custom_woocommerce_customer_note != woocommerce_order.customer_note:
 				sales_order.custom_woocommerce_customer_note = woocommerce_order.customer_note
+				so_dirty = True
+
+			# Woo order ID onto the visible field
+			if sales_order.meta.has_field("custom_woo_order_id") and cstr(
+				sales_order.get("custom_woo_order_id") or ""
+			) != cstr(woocommerce_order.id):
+				sales_order.custom_woo_order_id = woocommerce_order.id
+				so_dirty = True
+
+			# Pull the customer's cancel / return request across
+			if apply_wc_meta_to_sales_order(woocommerce_order, sales_order):
+				so_dirty = True
 
 			# Update the payment_method_title field if necessary, use the payment method ID
 			# if the title field is too long
@@ -372,14 +384,18 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 		"""
 		wc_order_dirty = False
 
-		# Update the woocommerce_status field if necessary
-		sales_order_wc_status = (
-			resolve_wc_status(sales_order)
-			if sales_order.woocommerce_status
-			else None
-		)
+		# Update the woocommerce_status field if necessary.
+		# resolve_wc_status is called unconditionally: custom_online_order_status is an
+		# override in its own right and must work even when woocommerce_status is unset.
+		sales_order_wc_status = resolve_wc_status(sales_order)
 		if sales_order_wc_status and sales_order_wc_status != wc_order.status:
 			wc_order.status = sales_order_wc_status
+			wc_order_dirty = True
+
+		# Push every ERP-authored value: courier, tracking, ETA, invoice, approval
+		meta_push = build_wc_meta_push(wc_order, sales_order)
+		if meta_push:
+			wc_order.meta_data = json.dumps(meta_push)
 			wc_order_dirty = True
 
 		# Get the Item WooCommerce ID's
@@ -488,6 +504,8 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 		self.sales_order = new_sales_order
 		new_sales_order.customer = customer_docname
 		new_sales_order.po_no = new_sales_order.woocommerce_id = wc_order.id
+		if new_sales_order.meta.has_field("custom_woo_order_id"):
+			new_sales_order.custom_woo_order_id = wc_order.id
 		new_sales_order.custom_woocommerce_customer_note = wc_order.customer_note
 
 		new_sales_order.woocommerce_status = WC_ORDER_STATUS_MAPPING_REVERSE.get(wc_order.status)
@@ -948,6 +966,125 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 
 		address.flags.ignore_mandatory = True
 		address.save()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ERPNext <-> WooCommerce field mapping
+#
+# Every value has exactly one author, and nothing writes to a field it does
+# not own — so the two systems can never fight over the same value.
+#
+# Woo meta keys carry no leading underscore: WooCommerce treats "_"-prefixed
+# meta as protected and strips it from the REST API.
+# ═══════════════════════════════════════════════════════════════════
+
+# ERP is the author  ->  pushed into WooCommerce order meta
+SO_TO_WC_META = {
+    "custom_courier": "adv_courier",
+    "custom_tracking_id": "adv_tracking_id",
+    "custom_tracking_url": "adv_tracking_url",
+    "custom_expected_delivery": "adv_expected_delivery",
+    "custom_online_cancelreturn_approval": "adv_cancelreturn_approval",
+}
+
+# The customer is the author  ->  pulled from WooCommerce order meta
+WC_META_TO_SO = {
+    "adv_cancelreturn_request": "custom_online_cancelreturn_request",
+    "adv_cancelreturn_reason": "custom_online_cancelreturn_reason",
+    "adv_cancelreturn_date": "custom_online_cancelreturn_date",
+}
+
+
+def _wc_meta_dict(wc_order):
+    """WooCommerce Order meta_data as a plain {key: value} dict."""
+    raw = wc_order.get("meta_data")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = []
+    if not isinstance(raw, list):
+        return {}
+    return {
+        row["key"]: cstr(row.get("value") or "")
+        for row in raw
+        if isinstance(row, dict) and row.get("key")
+    }
+
+
+def _so_field(sales_order, fieldname):
+    """Read a Sales Order field, tolerating one that does not exist yet."""
+    if not sales_order.meta.has_field(fieldname):
+        return ""
+    return cstr(sales_order.get(fieldname) or "")
+
+
+def _invoice_details(sales_order):
+    """
+    (invoice_no, invoice_date) from the latest submitted Sales Invoice.
+
+    Derived rather than stored: ERPNext already holds this on the invoice, and a
+    copy on the Sales Order would be a second source of truth to keep in step.
+    """
+    rows = frappe.db.sql(
+        """
+        SELECT si.name, si.posting_date
+        FROM `tabSales Invoice Item` sii
+        JOIN `tabSales Invoice` si ON si.name = sii.parent
+        WHERE sii.sales_order = %s AND si.docstatus = 1
+        ORDER BY si.posting_date DESC, si.creation DESC
+        LIMIT 1
+        """,
+        sales_order.name,
+        as_dict=True,
+    )
+    if not rows:
+        return "", ""
+    return cstr(rows[0].name), cstr(rows[0].posting_date or "")
+
+
+def build_wc_meta_push(wc_order, sales_order):
+    """
+    Meta rows WooCommerce needs so it matches ERPNext. Empty list = no change.
+
+    Only changed rows are returned. WooCommerce merges meta_data by key on
+    update, so keys we do not send are left untouched.
+    """
+    current = _wc_meta_dict(wc_order)
+
+    wanted = {
+        meta_key: _so_field(sales_order, so_field)
+        for so_field, meta_key in SO_TO_WC_META.items()
+    }
+    inv_no, inv_date = _invoice_details(sales_order)
+    wanted["adv_invoice_no"] = inv_no
+    wanted["adv_invoice_date"] = inv_date
+
+    return [{"key": k, "value": v} for k, v in wanted.items() if current.get(k, "") != v]
+
+
+def apply_wc_meta_to_sales_order(wc_order, sales_order):
+    """
+    Pull the customer-authored cancel/return request from WooCommerce onto the
+    Sales Order. Returns True if anything changed.
+
+    A blank incoming value is ignored rather than written: a request that has
+    already been recorded must never be silently erased by an empty push.
+    """
+    current = _wc_meta_dict(wc_order)
+    dirty = False
+
+    for meta_key, so_field in WC_META_TO_SO.items():
+        if not sales_order.meta.has_field(so_field):
+            continue
+        new_value = current.get(meta_key, "")
+        if not new_value:
+            continue
+        if cstr(sales_order.get(so_field) or "") != new_value:
+            sales_order.set(so_field, new_value)
+            dirty = True
+
+    return dirty
 
 
 # ERPNext "Online Order Status" -> WooCommerce order status slug.
