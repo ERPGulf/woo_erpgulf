@@ -207,7 +207,12 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 			# create missing order in ERPNext
 			self.create_sales_order(self.woocommerce_order)
 		elif self.sales_order and self.woocommerce_order:
-			# both exist, check sync hash
+			# Customer-authored values (the cancel / return request) only ever flow
+			# Woo -> ERP, so there is nothing to arbitrate: pull them on every sync,
+			# regardless of which side was modified last.
+			self.pull_customer_request(self.woocommerce_order, self.sales_order)
+
+			# Everything else is arbitrated by whichever side changed most recently.
 			if (
 				self.woocommerce_order.woocommerce_date_modified
 				!= self.sales_order.custom_woocommerce_last_sync_hash
@@ -231,6 +236,29 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 				if self.create_and_link_payment_entry(self.woocommerce_order, self.sales_order):
 					self.sales_order.save()
 
+	def pull_customer_request(self, wc_order, sales_order):
+		"""
+		Pull the customer's cancel / return request across.
+
+		Runs on every sync, independent of the modified-timestamp arbitration,
+		because these fields have exactly one author and never flow the other way.
+
+		db_set with update_modified=False: bumping `modified` here would flip the
+		arbitration on the next run and stall the ERP -> Woo direction instead.
+		"""
+		if sales_order.docstatus == 2:
+			return
+
+		current = _wc_meta_dict(wc_order)
+		for meta_key, so_field in WC_META_TO_SO.items():
+			if not sales_order.meta.has_field(so_field):
+				continue
+			new_value = current.get(meta_key, "")
+			if not new_value:
+				continue
+			if cstr(sales_order.get(so_field) or "") != new_value:
+				sales_order.db_set(so_field, new_value, update_modified=False)
+
 	def update_sales_order(self, woocommerce_order: WooCommerceOrder, sales_order: SalesOrder):
 		"""
 		Update the ERPNext Sales Order with fields from it's corresponding WooCommerce Order
@@ -245,6 +273,15 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 				sales_order.woocommerce_status = wc_order_status
 				so_dirty = True
 
+			# Re-mirror the live Woo status. Safe here: this branch only runs when the
+			# WooCommerce order is the newer of the two, so it can never clobber a
+			# status a member of staff has just set in ERPNext.
+			if sales_order.meta.has_field("custom_online_order_status") and cstr(
+				sales_order.get("custom_online_order_status") or ""
+			) != cstr(woocommerce_order.status or ""):
+				sales_order.custom_online_order_status = cstr(woocommerce_order.status or "")
+				so_dirty = True
+
 			if sales_order.custom_woocommerce_customer_note != woocommerce_order.customer_note:
 				sales_order.custom_woocommerce_customer_note = woocommerce_order.customer_note
 				so_dirty = True
@@ -256,9 +293,7 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 				sales_order.custom_woo_order_id = woocommerce_order.id
 				so_dirty = True
 
-			# Pull the customer's cancel / return request across
-			if apply_wc_meta_to_sales_order(woocommerce_order, sales_order):
-				so_dirty = True
+
 
 			# Update the payment_method_title field if necessary, use the payment method ID
 			# if the title field is too long
@@ -509,6 +544,10 @@ class SynchroniseSalesOrder(SynchroniseWooCommerce):
 		new_sales_order.custom_woocommerce_customer_note = wc_order.customer_note
 
 		new_sales_order.woocommerce_status = WC_ORDER_STATUS_MAPPING_REVERSE.get(wc_order.status)
+		# Mirror the live Woo status into the editable field so staff can see where the
+		# order actually is. Changing this field is what pushes a new status back to Woo.
+		if new_sales_order.meta.has_field("custom_online_order_status"):
+			new_sales_order.custom_online_order_status = cstr(wc_order.status or "")
 		wc_server = frappe.get_cached_doc("WooCommerce Server", wc_order.woocommerce_server)
 
 		new_sales_order.woocommerce_server = wc_order.woocommerce_server
