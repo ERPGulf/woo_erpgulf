@@ -1116,9 +1116,13 @@ class SynchroniseItem(SynchroniseWooCommerce):
                         }
                 if woosb_ids:
                     self._tracked_push(product_id, "woosb_ids", meta=[{"key": "woosb_ids", "value": woosb_ids}])
-                # Use the bundle's OWN (ERP) price, not the woosb children-sum.
+                # Use the bundle's OWN (ERP) price and stock, not the woosb
+                # children-derived values. Without woosb_manage_stock the plugin
+                # recomputes bundle stock as a company-wide min over the children,
+                # overriding the per-branch buildable figure ERP pushes.
                 self._tracked_push(product_id, "woosb_fixed_price",
-                                   meta={"woosb_disable_auto_price": "on"})
+                                   meta={"woosb_disable_auto_price": "on",
+                                         "woosb_manage_stock": "on"})
             except Exception as e:
                 frappe.log_error("woosb_ids rebuild failed", str(e))
 
