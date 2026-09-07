@@ -794,6 +794,14 @@ class SynchroniseItem(SynchroniseWooCommerce):
             frappe.log_error("Branch Stock Sync Failed", str(e))
 
         
+        # For kits, tell WooSB to respect the bundle's own stock BEFORE pushing the
+        # number. On read the plugin recomputes bundle stock from the children and
+        # stamps _stock with that value unless woosb_manage_stock is already "on",
+        # which is why a fresh kit otherwise needs two sync passes to settle.
+        if is_bundle:
+            self._tracked_push(product_id, "woosb_manage_stock_pre",
+                               meta={"woosb_manage_stock": "on"})
+
         try:
                         # Headline = sum of mapped web branches (kits: strict per-branch)
             total_qty = get_erp_stock_total(item.item.item_code)
