@@ -644,13 +644,19 @@ class SynchroniseItem(SynchroniseWooCommerce):
         """
         Update the WooCommerce Product with fields from it's corresponding ERPNext Item
         """
-        wc_server = frappe.get_all(
-            "WooCommerce Server",
-            fields=["name", "enable_sync"],
-            limit=1
+        # Check the server this item is actually linked to. The previous version
+        # took an arbitrary "limit=1" row with no enable_sync filter, so a single
+        # disabled server (advmotors.sa) silently stopped every push site-wide.
+        server = frappe.get_cached_doc(
+            "WooCommerce Server", item.item_woocommerce_server.woocommerce_server
         )
-        server = wc_server[0]
         if not server.enable_sync:
+            frappe.log_error(
+                "Woo sync disabled for server",
+                "Item {0}: server {1} has enable_sync = 0".format(
+                    item.item.item_code, server.name
+                ),
+            )
             return
 
         import time
