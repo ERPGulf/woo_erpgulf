@@ -121,7 +121,7 @@ frappe.query_reports["Woo Product Reconcile"] = {
                 function () {
                     frappe.call({
                         method: RECON + ".rebuild_woo_fitments",
-                        args: { csv: 1, lookup: 1 },
+                        args: { csv: 1, lookup: 0 },
                         freeze: true,
                         freeze_message: __("Starting fitment rebuild…"),
                         callback: function (r) {
