@@ -8,7 +8,7 @@ app_license = "GNU GPLv3"
 
 # include js in doctype views
 doctype_js = {"Sales Order": "public/js/selling/sales_order.js", 
-              "Item": "public/js/stock/item.js",
+              "Item": "public/js/item.js",
               "Woo Sync Log": "woocommerce_fusion/doctype/woo_sync_log/woo_sync_log.js",
               "Woo Verification Log": "woocommerce_fusion/doctype/woo_verification_log/woo_verification_log.js",
               "Woocommerce Customer": "woocommerce/doctype/woocommerce_customer/woocommerce_customer.js"
