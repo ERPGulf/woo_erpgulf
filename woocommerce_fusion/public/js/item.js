@@ -6,7 +6,7 @@ frappe.ui.form.on("Item", {
             () => {
                 frappe.dom.freeze(__("Queuing translation…"));
                 frappe.call({
-                    method: "woocommerce_fusion.api.translate.translate_item_in_woocommerce",
+                    method: "woocommerce_fusion.tasks.translate.translate_item_in_woocommerce",
                     args: { item_code: frm.doc.name },
                     callback(r) {
                         frappe.dom.unfreeze();
