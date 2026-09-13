@@ -21,84 +21,13 @@ doctype_list_js = {
     "Woo Verification Log": "woocommerce_fusion/doctype/woo_verification_log/woo_verification_log_list.js",
 	"Pricing Rule": "public/js/pricing_rule_list.js"
 }
-# doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
-# doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
-# Home Pages
-# ----------
-
-# application home page (will override Website Settings)
-# home_page = "login"
-
-# website user home page (by Role)
-# role_home_page = {
-# 	"Role": "home_page"
-# }
-
-# Generators
-# ----------
-
-# automatically create page for each record of this doctype
-# website_generators = ["Web Page"]
-
-# Jinja
-# ----------
-
-# add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "woocommerce_fusion.utils.jinja_methods",
-# 	"filters": "woocommerce_fusion.utils.jinja_filters"
-# }
-
-# Installation
-# ------------
-
-# before_install = "woocommerce_fusion.install.before_install"
-# after_install = "woocommerce_fusion.install.after_install"
-
-# Uninstallation
-# ------------
-
-# before_uninstall = "woocommerce_fusion.uninstall.before_uninstall"
-# after_uninstall = "woocommerce_fusion.uninstall.after_uninstall"
-
-# Desk Notifications
-# ------------------
-# See frappe.core.notifications.get_notification_config
-
-# notification_config = "woocommerce_fusion.notifications.get_notification_config"
-
-# Permissions
-# -----------
-# Permissions evaluated in scripted ways
-
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
-
-# DocType Class
-# ---------------
-# Override standard doctype classes
 
 override_doctype_class = {
 	"Sales Order": "woocommerce_fusion.overrides.selling.sales_order.CustomSalesOrder",
 }
 
-# Document Events
-# ---------------
-# Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
 doc_events = {
 	"Sales Order": {
 		# Allow-on-submit fields (custom_online_order_status) fire this event, not on_update
