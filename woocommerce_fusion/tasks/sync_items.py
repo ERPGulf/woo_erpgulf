@@ -1019,7 +1019,10 @@ class SynchroniseItem(SynchroniseWooCommerce):
         for offer in item.item.custom_offer_categories or []:
             offer_name = offer.offer_name
             offer_id = self.get_or_create_wc_offer_category(offer_name)
-            offer_categories.append(offer_id)
+            # None means the term doesn't exist in WooCommerce yet. Appending it
+            # would make the list truthy and push a null term, clearing the rest.
+            if offer_id:
+                offer_categories.append(offer_id)
             
         # Only push when ERP actually has offer categories for this item.
         # WooCommerce treats the list as a REPLACE, so an empty list would
@@ -1277,7 +1280,9 @@ class SynchroniseItem(SynchroniseWooCommerce):
         """Get category ID by name or create if not exists."""
         try:
             # 1️⃣ Try to find category by name
-            existing = self.wcapi.get("products/categories", params={"search": name}).json()
+            existing = self.wcapi.get(
+                "products/categories", params={"search": name, "per_page": 100}
+            ).json()
             # frappe.log_error("existing",existing)
             for cat in existing:
                 if cat["name"].lower() == name.lower():
