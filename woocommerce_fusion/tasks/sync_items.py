@@ -1021,7 +1021,11 @@ class SynchroniseItem(SynchroniseWooCommerce):
             offer_id = self.get_or_create_wc_offer_category(offer_name)
             offer_categories.append(offer_id)
             
-        self._tracked_push(product_id, "offer_category", offer_category=offer_categories)
+        # Only push when ERP actually has offer categories for this item.
+        # WooCommerce treats the list as a REPLACE, so an empty list would
+        # strip promo tags curated on the WordPress side.
+        if offer_categories:
+            self._tracked_push(product_id, "offer_category", offer_category=offer_categories)
             # frappe.log_error("offer category pushed",offer_categories)
         
         #  Sync "Bought Together" Items
