@@ -1714,6 +1714,9 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 "Lower Front": "سفلي أمامي", "Lower Rear": "سفلي خلفي",
                 "Center": "مركزي", "Top": "علوي",
                 "Bottom": "سفلي", "Middle": "وسطي",
+                "Consumables": "مستهلكات",
+                "Accessories": "ملحقات",
+                "Front Rear": "أمامي خلفي",
             }
             side_ar = {
                 "Left": "يسار", "Right": "يمين",
