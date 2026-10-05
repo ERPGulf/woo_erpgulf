@@ -966,7 +966,39 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
         # if compatibility_entries:
         #     is_spare_part = True
-        self._tracked_push(product_id, "spare_part", meta={"mark_spare_part": "1" if is_spare_part else "0"})
+        # 📦 Pack options: Item Pack Option table -> WooCommerce meta "adv_pack_options" (JSON).
+        # Row: name, qty, discount (%), price (TOTAL for the pack, same tax basis as
+        # Item Price; 0 = not set). WooCommerce prices each pack as:
+        #   price > 0  -> price
+        #   else       -> qty x product price x (1 - discount/100)
+        # Sent with mark_spare_part in one call (no extra API request). An empty
+        # list clears the meta, so packs removed in ERP also disappear on the site.
+        pack_rows = []
+        try:
+            for r in (item.item.get("custom_pack_options") or []):
+                q = int(r.get("qty") or 0)
+                if q <= 0:
+                    continue
+                d = float(r.get("discount") or 0)
+                p = float(r.get("price") or 0)
+                pack_rows.append({
+                    "name": (r.get("pack_name") or "").strip(),
+                    "qty": q,
+                    "discount": min(max(d, 0.0), 100.0),
+                    "price": round(max(p, 0.0), 2),
+                })
+            pack_rows.sort(key=lambda x: x["qty"])
+        except Exception as e:
+            frappe.log_error("Pack options build failed", f"{item.item.item_code}: {e}")
+            pack_rows = None  # don't touch the Woo value if we couldn't read the table
+
+        spare_meta = [{"key": "mark_spare_part", "value": "1" if is_spare_part else "0"}]
+        if pack_rows is not None:
+            spare_meta.append({
+                "key": "adv_pack_options",
+                "value": json.dumps(pack_rows, ensure_ascii=False) if pack_rows else "",
+            })
+        self._tracked_push(product_id, "spare_part", meta=spare_meta)
 
         
         # ✅ Build compatibility data dynamically from ERPNext child table
