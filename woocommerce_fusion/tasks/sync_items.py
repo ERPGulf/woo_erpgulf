@@ -973,21 +973,8 @@ class SynchroniseItem(SynchroniseWooCommerce):
         #   else       -> qty x product price x (1 - discount/100)
         # Sent with mark_spare_part in one call (no extra API request). An empty
         # list clears the meta, so packs removed in ERP also disappear on the site.
-        pack_rows = []
         try:
-            for r in (item.item.get("custom_pack_options") or []):
-                q = int(r.get("qty") or 0)
-                if q <= 0:
-                    continue
-                d = float(r.get("discount") or 0)
-                p = float(r.get("price") or 0)
-                pack_rows.append({
-                    "name": (r.get("pack_name") or "").strip(),
-                    "qty": q,
-                    "discount": min(max(d, 0.0), 100.0),
-                    "price": round(max(p, 0.0), 2),
-                })
-            pack_rows.sort(key=lambda x: x["qty"])
+            pack_rows = build_pack_rows(item.item)
         except Exception as e:
             frappe.log_error("Pack options build failed", f"{item.item.item_code}: {e}")
             pack_rows = None  # don't touch the Woo value if we couldn't read the table
@@ -1954,6 +1941,66 @@ def get_erp_stock_total(item_code):
     """Sellable total for Woo = sum over the mapped web branches only."""
     return int(sum(_branch_qty_map(item_code).values()))
 
+
+# ── Pack options (Item Pack Option table <-> Woo meta "adv_pack_options") ──
+def build_pack_rows(item_doc):
+    """Item Pack Option rows -> the list pushed to Woo as adv_pack_options, sorted by qty.
+    Used by both the sync and the verification, so they always agree."""
+    rows = []
+    for r in (item_doc.get("custom_pack_options") or []):
+        q = int(r.get("qty") or 0)
+        if q <= 0:
+            continue
+        d = float(r.get("discount") or 0)
+        p = float(r.get("price") or 0)
+        rows.append({
+            "name": (r.get("pack_name") or "").strip(),
+            "qty": q,
+            "discount": min(max(d, 0.0), 100.0),
+            "price": round(max(p, 0.0), 2),
+        })
+    rows.sort(key=lambda x: x["qty"])
+    return rows
+
+
+def _normalise_pack_rows(rows):
+    out = []
+    for r in rows or []:
+        try:
+            out.append((
+                str(r.get("name") or "").strip(),
+                int(r.get("qty") or 0),
+                round(float(r.get("discount") or 0), 2),
+                round(float(r.get("price") or 0), 2),
+            ))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return sorted(out, key=lambda x: x[1])
+
+
+def _pack_rows_text(rows):
+    if rows is None:
+        return "Unreadable value"
+    if not rows:
+        return "None"
+    return "; ".join(
+        f"{n or 'Pack'} x{q}" + (f" -{d:g}%" if d else "") + (f" @{p:.2f}" if p else "")
+        for n, q, d, p in rows
+    )
+
+
+def compare_pack_options(item_doc, wc_meta_value):
+    """Compare ERP pack table with Woo meta. Returns (match, erp_text, wc_text)."""
+    erp = _normalise_pack_rows(build_pack_rows(item_doc))
+    wc = []
+    if wc_meta_value:
+        try:
+            parsed = json.loads(wc_meta_value) if isinstance(wc_meta_value, str) else wc_meta_value
+            wc = _normalise_pack_rows(parsed)
+        except Exception:
+            wc = None
+    return (wc is not None and erp == wc), _pack_rows_text(erp), _pack_rows_text(wc)
+
     
 def expand_years(text: str):
     results = []
@@ -2249,6 +2296,10 @@ def verify_woo_match(log_name):
     erp_has_image = bool((item.custom_woo_image_url or "").strip())
     results["Images"] = {"match": wc_has_image == erp_has_image}
 
+    # Pack options
+    pack_match, pack_erp, pack_wc = compare_pack_options(item, get_wc_meta("adv_pack_options"))
+    results["Pack Options"] = {"match": pack_match}
+
     # Compatibility
     sync2 = SynchroniseItem()
     compat_data, compat_count = sync2.build_compatibility_data(item_code)
@@ -2291,6 +2342,8 @@ def verify_woo_match(log_name):
             lines.append(f"{icon} Product Name\n    ERP: {erp_name}\n    WC:  {wc.get('name', '').strip()}")
         elif k == "Arabic Name":
             lines.append(f"{icon} Arabic Name\n    ERP: {erp_arabic}\n    WC:  {wc_arabic}")
+        elif k == "Pack Options":
+            lines.append(f"{icon} Pack Options\n    ERP: {pack_erp}\n    WC:  {pack_wc}")
         elif k == "Compatibility":
             lines.append(f"{icon} Compatibility\n    ERP: {compat_count} rows\n    WC:  {wc_compat_count} rows")
             if not compat_match and compat_count > 0:
@@ -2393,6 +2446,10 @@ def verify_item_woo_match(item_code):
         "erp": "Has image" if item.custom_woo_image_url else "No image",
         "wc": "Has image" if wc.get("images") else "No image"
     }
+
+    # Pack options
+    pack_match, pack_erp, pack_wc = compare_pack_options(item, get_wc_meta("adv_pack_options"))
+    results["Pack Options"] = {"match": pack_match, "erp": pack_erp, "wc": pack_wc}
 
     # Compatibility
     sync2 = SynchroniseItem()

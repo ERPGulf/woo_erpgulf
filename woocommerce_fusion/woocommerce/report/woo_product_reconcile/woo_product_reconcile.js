@@ -173,13 +173,13 @@ frappe.query_reports["Woo Product Reconcile"] = {
         value = default_formatter(value, row, column, data);
 
         // 1) All Woo-related columns -> blue
-        const wooCols = ["woo_name", "woo_compat", "woo_stock", "woo_price", "woo_status", "woo_id", "woo_matches"];
+        const wooCols = ["woo_name", "woo_compat", "woo_stock", "woo_price", "woo_status", "woo_id", "woo_matches", "woo_packs"];
         if (wooCols.includes(column.fieldname) || (column.fieldname && column.fieldname.indexOf("woowh_") === 0)) {
             value = `<span style="color:#0b5cff">${value}</span>`;
         }
 
         // 2) Match ticks -> green/red
-        if (["stock_match", "price_match"].includes(column.fieldname)) {
+        if (["stock_match", "price_match", "pack_match"].includes(column.fieldname)) {
             if (value.indexOf("✗") > -1) value = `<span style="color:#c0392b;font-weight:700">✗</span>`;
             else if (value.indexOf("✓") > -1) value = `<span style="color:#157347;font-weight:700">✓</span>`;
         }

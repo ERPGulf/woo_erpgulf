@@ -59,7 +59,7 @@ CHECK_FILTERS = {
 # =====================================================================
 
 from woocommerce_fusion.tasks.sync_items import (
-    WAREHOUSE_TO_BRANCH, _branch_qty_map, get_erp_stock_total,
+    WAREHOUSE_TO_BRANCH, _branch_qty_map, get_erp_stock_total, compare_pack_options,
 )
 
 
@@ -117,6 +117,9 @@ def get_columns(branches):
         {"label": _("ERP kit opts"),    "fieldname": "erp_kit_opts","fieldtype": "Data",     "width": 90},
         {"label": _("Woo kit opts"),    "fieldname": "woo_kit_opts","fieldtype": "Data",     "width": 90},
         {"label": _("Kit children"),    "fieldname": "kit_children","fieldtype": "Data",     "width": 140},
+        {"label": _("ERP packs"),       "fieldname": "erp_packs",   "fieldtype": "Data",     "width": 220},
+        {"label": _("Woo packs"),       "fieldname": "woo_packs",   "fieldtype": "Data",     "width": 220},
+        {"label": _("Packs"),           "fieldname": "pack_match",  "fieldtype": "Data",     "width": 60},
     ]
     # ---- per branch: ERP qty (black) next to Woo qty (blue) ----
     for slug in branches:
@@ -253,6 +256,7 @@ def get_data(filters, items, branches):
     compat_map = get_erp_compat_map(codes)
     kit_expected_map = get_bundle_kit_option_counts(codes)   # bundle -> expected kit_variants
     kit_children_map = get_bundle_children_status(codes)     # bundle -> child sync status
+    pack_map = get_erp_pack_map(codes)                       # item -> Item Pack Option rows
 
     # items that have any Item WooCommerce Server row (needed for the "no server" reason)
     server_parents = {r["parent"] for r in frappe.get_all(
@@ -319,6 +323,22 @@ def get_data(filters, items, branches):
             if _kc and _kc.get("missing"):
                 diff_on = (diff_on + " + " if diff_on else "") + _("Kit child missing")
 
+        # Pack options: ERP Item Pack Option table vs Woo meta adv_pack_options.
+        # The AR product and its EN WPML twin share the SKU; only the AR one holds
+        # the meta, so take the first non-empty value of the two.
+        woo_pack_val = ""
+        for _w in woo_list:
+            _v = _woo_meta(_w).get("adv_pack_options")
+            if _v:
+                woo_pack_val = _v
+                break
+        pk_match, pk_erp, pk_woo = compare_pack_options(
+            {"custom_pack_options": pack_map.get(sku, [])}, woo_pack_val
+        )
+        has_packs = pk_erp != "None" or pk_woo != "None"
+        if woo and has_packs and not pk_match:
+            diff_on = (diff_on + " + " if diff_on else "") + _("Packs")
+
         note = sync_reason(it, erp_price, sku in server_parents)
         row = {
             "sku": sku,
@@ -331,6 +351,9 @@ def get_data(filters, items, branches):
             "erp_kit_opts": erp_kit_opts if is_bundle else "",
             "woo_kit_opts": woo_kit_opts if is_bundle else "",
             "kit_children": _kit_children_label(kit_children_map.get(sku)) if is_bundle else "",
+            "erp_packs": pk_erp if has_packs else "",
+            "woo_packs": pk_woo if has_packs else "",
+            "pack_match": ("✓" if pk_match else "✗") if (has_packs and woo) else "",
             "erp_stock": erp_stock,
             "woo_stock": woo_stock_disp,
             "stock_match": stock_match,
@@ -488,6 +511,22 @@ def get_erp_compat_map(codes):
         grouped.setdefault(r["parent"], []).append(r)
     return {pid: _summarise([(r.get("brand"), r.get("model"), r.get("years")) for r in rws])
             for pid, rws in grouped.items()}
+
+
+def get_erp_pack_map(codes):
+    """{item_code: [Item Pack Option rows]} — the same rows the sync pushes as adv_pack_options."""
+    if not codes or not frappe.db.exists("DocType", "Item Pack Option"):
+        return {}
+    rows = frappe.get_all(
+        "Item Pack Option",
+        filters={"parenttype": "Item", "parentfield": "custom_pack_options", "parent": ["in", codes]},
+        fields=["parent", "pack_name", "qty", "discount", "price"],
+        order_by="parent asc, idx asc",
+    )
+    out = {}
+    for r in rows:
+        out.setdefault(r["parent"], []).append(r)
+    return out
 
 
 def woo_compat_summary(woo):
