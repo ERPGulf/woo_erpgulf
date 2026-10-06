@@ -1,3 +1,4 @@
+import html
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -1009,17 +1010,24 @@ class SynchroniseItem(SynchroniseWooCommerce):
         # # --- Push product categories ---
         categories = []
 
-        main_cat = (item.item.category or "").strip()
-        sub_cat = (item.item.sub_category or "").strip()
-        main_cat_ar = self.translate_text(main_cat) if main_cat else ""
-        sub_cat_ar = self.translate_text(sub_cat) if sub_cat else ""
-        if main_cat_ar:
-            parent_id = self.get_or_create_wc_category(main_cat_ar)  
-            categories.append({"id": parent_id})
-            if sub_cat_ar:
-                child_id = self.get_or_create_wc_category(sub_cat_ar, parent_id)
-                categories.append({"id": child_id})
-        categories = [dict(t) for t in {tuple(d.items()) for d in categories}]
+        try:
+            sub_cat = (item.item.sub_category or "").strip()
+            main_cat = (item.item.category or "").strip()
+            if sub_cat:
+                # the sub-category's own Main Category decides the parent on the website
+                main_cat = frappe.db.get_value("Sub Category", sub_cat, "custom_main_category") or main_cat
+            if main_cat:
+                main_id = self.resolve_wc_category(main_cat)
+                if main_id:
+                    categories.append({"id": main_id})
+                    if sub_cat and sub_cat.lower() != main_cat.lower():
+                        sub_id = self.resolve_wc_category(main_cat, sub_cat)
+                        if sub_id and sub_id != main_id:
+                            categories.append({"id": sub_id})
+        except Exception:
+            categories = []  # leave the product's categories untouched on any error
+            frappe.log_error("WooCommerce category resolve failed",
+                             f"{item.item.item_code}\n{frappe.get_traceback()}")
         if categories:
             try:
                 self._tracked_push(product_id, "categories", categories=categories)
@@ -1227,16 +1235,19 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
 
     # Trnslation of arabic to english        
-    def translate_text(self, arabic_text):
-        if not arabic_text:
+    def translate_text(self, text):
+        '''Arabic name for an English ERP value, from the Translation list (Arabic rows first).'''
+        if not text:
             return ""
-        
         translated = frappe.db.get_value(
             "Translation",
-            {"source_text": arabic_text},
-            "translated_text"
+            {"source_text": text, "language": ["like", "ar%"]},
+            "translated_text",
+            order_by="modified desc",
+        ) or frappe.db.get_value(  # fallback: rows saved without an Arabic language code
+            "Translation", {"source_text": text}, "translated_text", order_by="modified desc"
         )
-        return translated or arabic_text 
+        return (translated or text).strip()
 
           
     # compatability      
@@ -1295,28 +1306,73 @@ class SynchroniseItem(SynchroniseWooCommerce):
 
 
             
+    def _cat_fields(self, doctype):
+        '''(arabic_field, woo_id_field) that exist on Category / Sub Category, or None.'''
+        cache = self.__dict__.setdefault("_cat_field_cache", {})
+        if doctype not in cache:
+            meta = frappe.get_meta(doctype)
+            pick = lambda names: next((f for f in names if meta.has_field(f)), None)
+            cache[doctype] = (pick(["custom_arabic_name", "custom_name_ar"]),
+                              pick(["custom_woo_id", "custom_woo_category_id"]))
+        return cache[doctype]
+
+    def resolve_wc_category(self, main_cat, sub_cat=""):
+        '''ERP Category / Sub Category -> WooCommerce product category id.
+        1. Woo ID stored on the ERP record -> use it.
+        2. Else find/create by Arabic Name (or the translated name, as before) under the right
+           parent, and store the id on the record so it is reused from then on.'''
+        doctype, docname = ("Sub Category", sub_cat) if sub_cat else ("Category", main_cat)
+        ar_f, woo_f = self._cat_fields(doctype)
+        rec = frappe.db.get_value(doctype, docname, ["name"] + [f for f in (ar_f, woo_f) if f], as_dict=True)
+        if not rec:
+            return None
+        stored = rec.get(woo_f) if woo_f else None
+        if stored and str(stored).strip().isdigit() and int(stored) > 0:
+            return int(stored)
+
+        parent_id = 0
+        if sub_cat:
+            parent_id = self.resolve_wc_category(main_cat)
+            if not parent_id:
+                return None  # never create a sub-category at top level
+        name = ((rec.get(ar_f) if ar_f else "") or "").strip() or self.translate_text(rec.name)
+        wc_id = self.get_or_create_wc_category(name, parent_id)
+        if wc_id and woo_f:
+            frappe.db.set_value(doctype, rec.name, woo_f, int(wc_id), update_modified=False)
+            frappe.db.commit()
+        return wc_id
+
     def get_or_create_wc_category(self, name, parent_id=0):
-        """Get category ID by name or create if not exists."""
+        '''Find a category by exact name UNDER THIS PARENT, else create it.'''
+        name = (name or "").strip()
+        parent_id = int(parent_id or 0)
+        if not name or not self.wcapi:
+            return None
+        cache = self.__dict__.setdefault("_wc_cat_cache", {})
+        key = (name.lower(), parent_id)
+        if key in cache:
+            return cache[key]
         try:
-            # 1️⃣ Try to find category by name
-            existing = self.wcapi.get(
-                "products/categories", params={"search": name, "per_page": 100}
+            found = self.wcapi.get(
+                "products/categories",
+                params={"search": name, "parent": parent_id, "per_page": 100},
             ).json()
-            # frappe.log_error("existing",existing)
-            for cat in existing:
-                if cat["name"].lower() == name.lower():
+            for cat in (found if isinstance(found, list) else []):
+                if html.unescape(cat.get("name") or "").strip().lower() == name.lower():
+                    cache[key] = cat["id"]
                     return cat["id"]
 
-            # 2️⃣ Not found → create new category
-            new_cat = {
-                "name": name,
-                "parent": parent_id or 0
-            }
-            res = self.wcapi.post("products/categories", new_cat).json()
-            return res.get("id")
-
-        except Exception as e:
-            frappe.log_error(f"❌ Error creating/fetching category {name}: {e}")
+            res = self.wcapi.post("products/categories", {"name": name, "parent": parent_id}).json()
+            # a "term_exists" error still returns the existing id
+            wc_id = res.get("id") or (res.get("data") or {}).get("resource_id")
+            if not wc_id:
+                frappe.log_error("WooCommerce category not created", f"{name} (parent {parent_id})\n{res}")
+                return None
+            cache[key] = wc_id
+            return wc_id
+        except Exception:
+            frappe.log_error("WooCommerce category lookup failed",
+                             f"{name} (parent {parent_id})\n{frappe.get_traceback()}")
             return None
     
     def get_or_create_wc_offer_category(self, name):
