@@ -37,6 +37,12 @@ frappe.query_reports["Woo Product Reconcile"] = {
             default: 1,
         },
         {
+            fieldname: "cat_mismatch_only",
+            label: __("Only category mismatches"),
+            fieldtype: "Check",
+            default: 0,
+        },
+        {
             fieldname: "only_bundles",
             label: __("Bundles only"),
             fieldtype: "Check",
@@ -173,15 +179,16 @@ frappe.query_reports["Woo Product Reconcile"] = {
         value = default_formatter(value, row, column, data);
 
         // 1) All Woo-related columns -> blue
-        const wooCols = ["woo_name", "woo_compat", "woo_stock", "woo_price", "woo_status", "woo_id", "woo_matches", "woo_packs"];
+        const wooCols = ["woo_name", "woo_compat", "woo_stock", "woo_price", "woo_status", "woo_id", "woo_matches", "woo_packs", "woo_cats"];
         if (wooCols.includes(column.fieldname) || (column.fieldname && column.fieldname.indexOf("woowh_") === 0)) {
             value = `<span style="color:#0b5cff">${value}</span>`;
         }
 
         // 2) Match ticks -> green/red
-        if (["stock_match", "price_match", "pack_match"].includes(column.fieldname)) {
+        if (["stock_match", "price_match", "pack_match", "cat_match"].includes(column.fieldname)) {
             if (value.indexOf("✗") > -1) value = `<span style="color:#c0392b;font-weight:700">✗</span>`;
             else if (value.indexOf("✓") > -1) value = `<span style="color:#157347;font-weight:700">✓</span>`;
+            else if (value.indexOf("?") > -1) value = `<span style="color:#b7791f;font-weight:700">?</span>`;
         }
 
         // 3) "Diff on" -> amber when something differs

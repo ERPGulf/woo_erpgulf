@@ -120,6 +120,9 @@ def get_columns(branches):
         {"label": _("ERP packs"),       "fieldname": "erp_packs",   "fieldtype": "Data",     "width": 220},
         {"label": _("Woo packs"),       "fieldname": "woo_packs",   "fieldtype": "Data",     "width": 220},
         {"label": _("Packs"),           "fieldname": "pack_match",  "fieldtype": "Data",     "width": 60},
+        {"label": _("ERP categories"),  "fieldname": "erp_cats",    "fieldtype": "Data",     "width": 260},
+        {"label": _("Woo categories"),  "fieldname": "woo_cats",    "fieldtype": "Data",     "width": 260},
+        {"label": _("Categories"),      "fieldname": "cat_match",   "fieldtype": "Data",     "width": 80},
     ]
     # ---- per branch: ERP qty (black) next to Woo qty (blue) ----
     for slug in branches:
@@ -159,7 +162,7 @@ def get_items(filters):
     return frappe.get_all(
         "Item",
         filters=item_filters,
-        fields=["item_code", "item_name", "custom_woo_name__arabic", "disabled",
+        fields=["item_code", "item_name", "custom_woo_name__arabic", "disabled", "category", "sub_category",
                 "custom_disable_sync", "custom_disable_sync_if_not_in_stock",
                 WOO_ID_FIELD + " as woo_id"],
                 order_by="item_code asc",
@@ -245,6 +248,46 @@ def woo_kit_variants_count(woo):
     except (TypeError, ValueError):
         return 0
 
+def _woo_id_field(doctype):
+    """Woo ID custom field on Category / Sub Category (name differs between sites)."""
+    meta = frappe.get_meta(doctype)
+    return next((f for f in ("custom_woo_id", "custom_woo_category_id") if meta.has_field(f)), None)
+
+
+def get_expected_cat_map(items):
+    """{item_code: ([woo_cat_id, ...], label)} - the categories the sync pushes:
+    the Woo ID of the Sub Category's Main Category (else the item's Category) and the
+    Sub Category's own Woo ID. None in the list = that category has no Woo ID yet."""
+    cat_f = _woo_id_field("Category")
+    sub_f = _woo_id_field("Sub Category")
+    subs = {r["name"]: r for r in frappe.get_all(
+        "Sub Category", fields=["name", "custom_main_category"] + ([sub_f] if sub_f else []))}
+    cats = {r["name"]: r for r in frappe.get_all(
+        "Category", fields=["name"] + ([cat_f] if cat_f else []))}
+
+    def _id(v):
+        return int(v) if v and str(v).strip().isdigit() and int(v) > 0 else None
+
+    out = {}
+    for it in items:
+        sub = (it.get("sub_category") or "").strip()
+        main = (it.get("category") or "").strip()
+        s = subs.get(sub) if sub else None
+        if s and s.get("custom_main_category"):
+            main = s["custom_main_category"]
+        ids, label = [], ""
+        if main:
+            mid = _id((cats.get(main) or {}).get(cat_f)) if cat_f else None
+            ids.append(mid)
+            label = "%s (%s)" % (main, mid or "—")
+            if s and sub.lower() != main.lower():
+                sid = _id(s.get(sub_f)) if sub_f else None
+                ids.append(sid)
+                label += " › %s (%s)" % (sub, sid or "—")
+        out[it["item_code"]] = (ids, label)
+    return out
+
+
 def get_data(filters, items, branches):
     codes = [i["item_code"] for i in items]
 
@@ -257,6 +300,8 @@ def get_data(filters, items, branches):
     kit_expected_map = get_bundle_kit_option_counts(codes)   # bundle -> expected kit_variants
     kit_children_map = get_bundle_children_status(codes)     # bundle -> child sync status
     pack_map = get_erp_pack_map(codes)                       # item -> Item Pack Option rows
+
+    exp_cat_map = get_expected_cat_map(items)                # item -> categories the sync pushes
 
     # items that have any Item WooCommerce Server row (needed for the "no server" reason)
     server_parents = {r["parent"] for r in frappe.get_all(
@@ -339,6 +384,23 @@ def get_data(filters, items, branches):
         if woo and has_packs and not pk_match:
             diff_on = (diff_on + " + " if diff_on else "") + _("Packs")
 
+        # Categories: what the sync pushes (stored Woo IDs) vs the live product.
+        # The AR product and its EN WPML twin share the SKU; the AR one carries these ids.
+        exp_ids, erp_cats = exp_cat_map.get(sku, ([], ""))
+        woo_sets = [{c.get("id") for c in (w.get("categories") or [])} for w in woo_list]
+        if not exp_ids or not woo_list:
+            cat_match = "—"
+        elif None in exp_ids:
+            cat_match = "?"   # a Category / Sub Category has no Woo ID yet; the next sync sets it
+        else:
+            cat_match = "✓" if set(exp_ids) in woo_sets else "✗"
+        show = next((w for w in woo_list
+                     if {c.get("id") for c in (w.get("categories") or [])} & set(exp_ids)), woo)
+        woo_cats = ", ".join("%s %s" % (c.get("id"), c.get("name"))
+                             for c in ((show or {}).get("categories") or []))
+        if cat_match == "✗":
+            diff_on = (diff_on + " + " if diff_on else "") + _("Categories")
+
         note = sync_reason(it, erp_price, sku in server_parents)
         row = {
             "sku": sku,
@@ -354,6 +416,9 @@ def get_data(filters, items, branches):
             "erp_packs": pk_erp if has_packs else "",
             "woo_packs": pk_woo if has_packs else "",
             "pack_match": ("✓" if pk_match else "✗") if (has_packs and woo) else "",
+            "erp_cats": erp_cats,
+            "woo_cats": woo_cats,
+            "cat_match": cat_match,
             "erp_stock": erp_stock,
             "woo_stock": woo_stock_disp,
             "stock_match": stock_match,
@@ -374,10 +439,12 @@ def get_data(filters, items, branches):
 
         if only_mismatch and not diff_on:
             continue
+        if filters.get("cat_mismatch_only") and cat_match != "✗":
+            continue
         rows.append(row)
 
     # ---- Woo-only SKUs (only in full-catalogue mode, no scoping filter) ----
-    if not scoped:
+    if not scoped and not filters.get("cat_mismatch_only"):
         erp_set = set(codes)
         for sku, wlist in woo_map.items():
             if sku in erp_set:
@@ -695,7 +762,7 @@ def _woo_get(path, params=None):
 
 
 # Only pull the fields the report actually uses -> far smaller/faster responses.
-WOO_FIELDS = "id,sku,name,price,regular_price,stock_quantity,status,meta_data"
+WOO_FIELDS = "id,sku,name,price,regular_price,stock_quantity,status,meta_data,categories"
 
 
 def fetch_woo_one(sku):

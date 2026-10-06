@@ -1026,6 +1026,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                             categories.append({"id": sub_id})
         except Exception:
             categories = []  # leave the product's categories untouched on any error
+            self._push_log.append({"ok": False, "status": "category error", "product_id": product_id, "field": "categories"})
             frappe.log_error("WooCommerce category resolve failed",
                              f"{item.item.item_code}\n{frappe.get_traceback()}")
         if categories:
@@ -2530,6 +2531,26 @@ def verify_item_woo_match(item_code):
         "match": compat_match,
         "erp": f"{compat_count} rows",
         "wc": f"{wc_compat_count} rows"
+    }
+
+    # Categories: website categories must equal the stored Woo IDs of the item's
+    # Sub Category and its Main Category (read-only, never creates anything)
+    _, woo_f_cat = sync._cat_fields("Category")
+    _, woo_f_sub = sync._cat_fields("Sub Category")
+    main_name = item.category
+    if item.sub_category:
+        main_name = frappe.db.get_value("Sub Category", item.sub_category, "custom_main_category") or main_name
+    expected = set()
+    for dt, name, f in (("Category", main_name, woo_f_cat), ("Sub Category", item.sub_category, woo_f_sub)):
+        if name and f:
+            v = frappe.db.get_value(dt, name, f)
+            if v and str(v).strip().isdigit():
+                expected.add(int(v))
+    wc_cats = wc.get("categories", []) or []
+    results["Categories"] = {
+        "match": bool(expected) and expected == {c.get("id") for c in wc_cats},
+        "erp": ", ".join(str(i) for i in sorted(expected)) or "not mapped yet",
+        "wc": ", ".join(f"{c.get('id')} {c.get('name')}" for c in wc_cats) or "none",
     }
 
     overall = all(v["match"] for v in results.values())
