@@ -38,6 +38,9 @@ doc_events = {
 		"after_insert": "woocommerce_fusion.tasks.auto_push.on_item_price",
 		"on_trash":     "woocommerce_fusion.tasks.auto_push.on_item_price",
 	},
+	"Item": {
+		"before_insert": "woocommerce_fusion.tasks.sync_items.clear_woo_link_on_new_item",
+	},
 	"Stock Ledger Entry": {
 		"after_insert": "woocommerce_fusion.tasks.auto_push.on_stock_ledger_entry",
 	},

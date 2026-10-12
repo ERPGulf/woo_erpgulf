@@ -45,6 +45,20 @@ def run_item_sync_from_hook(doc, method):
         frappe.enqueue(clear_sync_hash_and_run_item_sync, item_code=doc.name)
 
 
+def clear_woo_link_on_new_item(doc, method=None):
+    """
+    Item before_insert hook. A new Item made with ERPNext "Duplicate" copies the
+    original's WooCommerce rows, Woo ID included, so its syncs would overwrite the
+    original's product. A new Item starts unlinked; the first sync creates its own
+    product. Items created BY the sync (from a Woo product) keep their ID.
+    """
+    if doc.flags.get("created_by_sync"):
+        return
+    for row in doc.get("woocommerce_servers") or []:
+        row.woocommerce_id = None
+        row.woocommerce_last_sync_hash = None
+
+
 @frappe.whitelist()
 def run_item_sync(
     item_code: Optional[str] = None,
@@ -280,9 +294,57 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 self.create_woocommerce_product(self.item)
             else:
                 self.woocommerce_product = wc_products[0]
+                self.check_woo_link()
 
         if self.woocommerce_product and not self.item:
             self.get_erpnext_item()
+
+    def check_woo_link(self):
+        """
+        The stored Woo ID must point at THIS item's own product (Woo SKU == item code).
+        An item made with ERPNext "Duplicate" keeps the original item's Woo ID, and every
+        sync would then overwrite the other item's product. When the SKU differs:
+          - link to the product that already carries this item's SKU, if there is one
+          - otherwise forget the wrong ID, so the sync creates this item's own product
+        """
+        code = (self.item.item.item_code or "").strip()
+        wc_sku = (getattr(self.woocommerce_product, "sku", "") or "").strip()
+        if not wc_sku or wc_sku == code:
+            return
+
+        iws = self.item.item_woocommerce_server
+        wrong_id = iws.woocommerce_id
+        if not self.wcapi:
+            # Can't look the SKU up -> stop here rather than overwrite someone else's product
+            frappe.throw(_("Woo ID {0} of {1} belongs to SKU {2}; WooCommerce API not available").format(
+                wrong_id, code, wc_sku))
+
+        res = self.wcapi.get("products", params={"sku": code, "per_page": 10, "_fields": "id,sku,lang"}).json()
+        hits = [p for p in (res if isinstance(res, list) else []) if (p.get("sku") or "").strip() == code]
+        right_id = ""
+        if hits:
+            arabic = [p for p in hits if p.get("lang") == "ar"]
+            right_id = str(sorted(arabic or hits, key=lambda p: int(p["id"]))[0]["id"])
+
+        frappe.db.set_value(
+            "Item WooCommerce Server",
+            iws.name,
+            {"woocommerce_id": right_id, "woocommerce_last_sync_hash": None},
+            update_modified=False,
+        )
+        iws.woocommerce_id = right_id
+        frappe.log_error(
+            "Woo ID corrected",
+            "{0}: stored Woo ID {1} belongs to SKU {2}. {3}".format(
+                code, wrong_id, wc_sku,
+                "Linked to product {0}.".format(right_id) if right_id
+                else "Cleared; a new product will be created for this item."),
+        )
+        if right_id:
+            found = get_list_of_wc_products(item=self.item)
+            self.woocommerce_product = found[0] if found else None
+        else:
+            self.woocommerce_product = None
 
     def get_erpnext_item(self):
         """
@@ -1487,10 +1549,17 @@ class SynchroniseItem(SynchroniseWooCommerce):
         self.woocommerce_product = wc_product
         wc_product.id=wc_product.woocommerce_id
         try:
-            item.item.reload()
+            # Store the new Woo ID on the link row directly. Saving the whole Item ran every
+            # Item validation, and one unrelated invalid field lost the ID -> the next sync
+            # created a second product for the same item.
             item.item_woocommerce_server.woocommerce_id = wc_product.woocommerce_id
-            item.item.flags.created_by_sync = True
-            item.item.save()
+            frappe.db.set_value(
+                "Item WooCommerce Server",
+                item.item_woocommerce_server.name,
+                "woocommerce_id",
+                wc_product.woocommerce_id,
+                update_modified=False,
+            )
             frappe.db.commit()
         except Exception as e:
             frappe.log_error(f"Failed to update ERPNext item with WC ID: {e}")  

@@ -134,9 +134,29 @@ def on_item_price(doc, method=None):
         frappe.log_error(frappe.get_traceback(), "woo_autopush on_item_price")
 
 
+def _parent_kits(item_code):
+    """Kit (Product Bundle) item codes that contain this item as a part."""
+    if not item_code:
+        return []
+    parents = frappe.get_all(
+        "Product Bundle Item",
+        filters={"item_code": item_code, "parenttype": "Product Bundle"},
+        pluck="parent",
+    )
+    if not parents:
+        return []
+    return frappe.get_all(
+        "Product Bundle", filters={"name": ["in", list(set(parents))]}, pluck="new_item_code"
+    )
+
+
 def on_stock_ledger_entry(doc, method=None):
-    """Stock Ledger Entry insert -> stock moved -> push the item."""
+    """Stock Ledger Entry insert -> stock moved -> push the item, and every kit that
+    uses it (a kit's stock is built from its parts, so it changes with them)."""
     try:
-        _queue_push(getattr(doc, "item_code", None))
+        code = getattr(doc, "item_code", None)
+        _queue_push(code)
+        for kit in _parent_kits(code):
+            _queue_push(kit)
     except Exception:
         frappe.log_error(frappe.get_traceback(), "woo_autopush on_sle")

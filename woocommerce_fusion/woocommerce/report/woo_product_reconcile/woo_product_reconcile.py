@@ -19,6 +19,8 @@ Then `bench --site <site> migrate` (or reload) so ERPNext registers the report.
 """
 
 import re
+import unicodedata
+import urllib.parse
 
 import frappe
 from frappe import _
@@ -123,6 +125,9 @@ def get_columns(branches):
         {"label": _("ERP categories"),  "fieldname": "erp_cats",    "fieldtype": "Data",     "width": 260},
         {"label": _("Woo categories"),  "fieldname": "woo_cats",    "fieldtype": "Data",     "width": 260},
         {"label": _("Categories"),      "fieldname": "cat_match",   "fieldtype": "Data",     "width": 80},
+        {"label": _("ERP offers"),      "fieldname": "erp_offers",  "fieldtype": "Data",     "width": 180},
+        {"label": _("Woo offers"),      "fieldname": "woo_offers",  "fieldtype": "Data",     "width": 180},
+        {"label": _("Offers"),          "fieldname": "offer_match", "fieldtype": "Data",     "width": 70},
     ]
     # ---- per branch: ERP qty (black) next to Woo qty (blue) ----
     for slug in branches:
@@ -138,6 +143,8 @@ def get_columns(branches):
         {"label": _("Presence"),        "fieldname": "presence",    "fieldtype": "Data",     "width": 120},
         {"label": _("Woo status"),      "fieldname": "woo_status",  "fieldtype": "Data",     "width": 90},
         {"label": _("Woo id"),          "fieldname": "woo_id",      "fieldtype": "Data",     "width": 80},
+        {"label": _("ERP Woo id"),      "fieldname": "erp_woo_id",  "fieldtype": "Data",     "width": 90},
+        {"label": _("Woo link"),        "fieldname": "link_match",  "fieldtype": "Data",     "width": 80},
         {"label": _("Woo matches"),     "fieldname": "woo_matches", "fieldtype": "Int",      "width": 90},
     ]
     return cols
@@ -302,6 +309,8 @@ def get_data(filters, items, branches):
     pack_map = get_erp_pack_map(codes)                       # item -> Item Pack Option rows
 
     exp_cat_map = get_expected_cat_map(items)                # item -> categories the sync pushes
+    link_map = get_woo_link_map(codes)                       # item -> Woo ID the sync pushes to
+    erp_offer_map = get_erp_offer_map(codes)                 # item -> ERP offer names
 
     # items that have any Item WooCommerce Server row (needed for the "no server" reason)
     server_parents = {r["parent"] for r in frappe.get_all(
@@ -312,6 +321,8 @@ def get_data(filters, items, branches):
         woo_map = {c: fetch_woo_one(c) for c in codes}
     else:
         woo_map = fetch_woo_map()
+
+    woo_offer_map, offer_terms = fetch_woo_offer_map()      # Woo product id -> offer slugs
 
     scoped = bool(
         filters.get("sku") or filters.get("brand") or filters.get("item_group")
@@ -401,6 +412,39 @@ def get_data(filters, items, branches):
         if cat_match == "✗":
             diff_on = (diff_on + " + " if diff_on else "") + _("Categories")
 
+        # Woo link: the Woo ID the sync pushes to must be this SKU's own product.
+        # A wrong ID (e.g. an item made with "Duplicate") makes the sync overwrite
+        # another item's product.
+        erp_woo_id = link_map.get(sku, "")
+        woo_ids = {str(w.get("id")) for w in woo_list}
+        if erp_woo_id:
+            link_match = "✓" if erp_woo_id in woo_ids else "✗"
+        else:
+            link_match = "✗" if woo_list else "—"
+        if link_match == "✗":
+            diff_on = (diff_on + " + " if diff_on else "") + _("Woo link")
+
+        # Offers: ERP "Offer Categories" vs the product's offer_category terms. The sync
+        # matches an offer to a Woo term by slug and only pushes when ERP has offers.
+        erp_offer_names = erp_offer_map.get(sku, [])
+        erp_offer_slugs = {_offer_slug(n) for n in erp_offer_names}
+        woo_offer_slugs = set()
+        for _w in woo_list:
+            woo_offer_slugs |= (woo_offer_map or {}).get(int(_w.get("id") or 0), set())
+        if not woo_list or not erp_offer_slugs:
+            offer_match = "—"
+        elif woo_offer_map is None:
+            offer_match = "?"
+        else:
+            offer_match = "✓" if erp_offer_slugs == woo_offer_slugs else "✗"
+        if offer_match == "✗":
+            diff_on = (diff_on + " + " if diff_on else "") + _("Offers")
+        erp_offers = ", ".join(
+            n + ("" if _offer_slug(n) in offer_terms or not offer_terms else " (no Woo offer)")
+            for n in erp_offer_names)
+        woo_offers = "?" if (woo_list and woo_offer_map is None) else ", ".join(
+            sorted(offer_terms.get(s, s) for s in woo_offer_slugs))
+
         note = sync_reason(it, erp_price, sku in server_parents)
         row = {
             "sku": sku,
@@ -419,6 +463,9 @@ def get_data(filters, items, branches):
             "erp_cats": erp_cats,
             "woo_cats": woo_cats,
             "cat_match": cat_match,
+            "erp_offers": erp_offers,
+            "woo_offers": woo_offers,
+            "offer_match": offer_match,
             "erp_stock": erp_stock,
             "woo_stock": woo_stock_disp,
             "stock_match": stock_match,
@@ -427,7 +474,9 @@ def get_data(filters, items, branches):
             "price_match": price_match,
             "presence": presence,
             "woo_status": woo_status,
-            "woo_id": woo_id or it.get("woo_id") or "",
+            "woo_id": woo_id or "",
+            "erp_woo_id": erp_woo_id,
+            "link_match": link_match,
             "woo_matches": len(woo_list),
             "can_sync": 1 if diff_on else 0,   # ERP item that differs -> syncable
             "erp_syncable": 0 if note else 1,  # ERP item, nothing blocking a push (matched or not)
@@ -478,6 +527,80 @@ def get_data(filters, items, branches):
             rows.append(r)
 
     return rows
+
+
+def get_woo_link_map(codes):
+    """{item_code: Woo ID stored in ERP} from Item WooCommerce Server (the product the sync pushes to)."""
+    out = {}
+    if not codes:
+        return out
+    for w in frappe.get_all(
+        "Item WooCommerce Server",
+        filters={"parent": ["in", codes]},
+        fields=["parent", "woocommerce_id"],
+    ):
+        wid = str(w.get("woocommerce_id") or "").strip()
+        if wid and w["parent"] not in out:
+            out[w["parent"]] = wid
+    return out
+
+
+def _offer_slug(name):
+    """Same slug the sync builds for an offer name (get_or_create_wc_offer_category)."""
+    v = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode("utf-8")
+    return re.sub(r"[^a-zA-Z0-9]+", "-", v).strip("-").lower()
+
+
+def get_erp_offer_map(codes):
+    """{item_code: [offer_name, ...]} from Item > Offer Categories."""
+    if not codes or not frappe.db.exists("DocType", "Offer Categories"):
+        return {}
+    out = {}
+    for r in frappe.get_all(
+        "Offer Categories",
+        filters={"parenttype": "Item", "parent": ["in", codes]},
+        fields=["parent", "offer_name"],
+        order_by="parent asc, idx asc",
+    ):
+        n = (r.get("offer_name") or "").strip()
+        if n:
+            out.setdefault(r["parent"], []).append(n)
+    return out
+
+
+def _wp_public_get(path, params=None):
+    """Public WordPress REST read (wp/v2) — no credentials needed for published data."""
+    base, _k, _s, _plist = _get_woo_server()
+    resp = requests.get(base + path, params=params or {}, timeout=API_TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_woo_offer_map():
+    """({woo_product_id: {offer_slug}}, {offer_slug: offer_name}) from the offer_category
+    taxonomy. Returns (None, terms) if the products could not be read."""
+    terms, by_product = {}, {}
+    try:
+        for t in _wp_public_get("/wp-json/wp/v2/offer_category",
+                                {"per_page": 100, "_fields": "id,slug,name,count"}) or []:
+            slug = urllib.parse.unquote(t.get("slug") or "")
+            terms[slug] = t.get("name") or slug
+            if not t.get("count"):
+                continue
+            page = 1
+            while page <= 20:
+                batch = _wp_public_get("/wp-json/wp/v2/product",
+                                       {"offer_category": t["id"], "per_page": 100,
+                                        "page": page, "_fields": "id"}) or []
+                for p in batch:
+                    by_product.setdefault(int(p["id"]), set()).add(slug)
+                if len(batch) < 100:
+                    break
+                page += 1
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "woo_product_reconcile fetch_woo_offer_map")
+        return None, terms
+    return by_product, terms
 
 
 def build_diff_on(presence, stock_match, price_match, erp_name, woo_name):
