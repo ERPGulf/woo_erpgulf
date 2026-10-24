@@ -1165,12 +1165,13 @@ class SynchroniseItem(SynchroniseWooCommerce):
                         # )
 
             if not invoices or not wc_ids:
-                random_items = frappe.get_all(
-                    "Item WooCommerce Server",
-                    filters={"woocommerce_id": ["is", "set"]},
-                    fields=["parent", "woocommerce_id"],
-                    order_by="RAND()",
-                    limit=3
+                random_items = frappe.db.sql(
+                    """SELECT parent, woocommerce_id
+                       FROM `tabItem WooCommerce Server`
+                       WHERE IFNULL(woocommerce_id, '') != ''
+                       ORDER BY RAND()
+                       LIMIT 3""",
+                    as_dict=True,
                 )
 
                 if random_items:
@@ -1826,7 +1827,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 )
 
                 # TEMP DIAGNOSTIC — remove after confirming
-                frappe.log_error(
+                if False: frappe.log_error(
                     "Kit Options DEBUG",
                     f"{bundle_name} | {row.item_code} | pos={position!r} side={side!r} "
                     f"type={opt_type!r} pack={pack_size!r} | wc_id={wc_id}"
