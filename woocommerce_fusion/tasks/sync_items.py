@@ -1891,9 +1891,9 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 "adv_hide_full_kit": "1" if frappe.db.get_value("Product Bundle", {"new_item_code": item.item.item_code}, "custom_dont_show_full_kit_on_portal") else "0",
             }
             for idx, row in enumerate(valid_rows):
-                meta[f"kit_variants_{idx}_option_position"]  = position_ar.get(row["position"], row["position"])
+                meta[f"kit_variants_{idx}_option_position"]  = (position_ar.get(row["position"]) or self.translate_text(row["position"]))
                 meta[f"_kit_variants_{idx}_option_position"] = "field_kit_variant_position"
-                meta[f"kit_variants_{idx}_option_side"]      = side_ar.get(row["side"], row["side"])
+                meta[f"kit_variants_{idx}_option_side"]      = (side_ar.get(row["side"]) or self.translate_text(row["side"]))
                 meta[f"_kit_variants_{idx}_option_side"]     = "field_kit_variant_side"
                 meta[f"kit_variants_{idx}_option_pack_size"]  = str(row["pack_size"]) if row["pack_size"] else ""
                 meta[f"_kit_variants_{idx}_option_pack_size"] = "field_kit_variant_pack_size"
@@ -1901,7 +1901,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 meta[f"_kit_variants_{idx}_qty"] = "field_kit_variant_qty"
                 meta[f"kit_variants_{idx}_variant_product"]  = str(row["wc_id"])
                 meta[f"_kit_variants_{idx}_variant_product"] = "field_kit_variant_product"
-                meta[f"kit_variants_{idx}_option_type"]  = type_ar.get(row["type"], row["type"])
+                meta[f"kit_variants_{idx}_option_type"]  = (type_ar.get(row["type"]) or self.translate_text(row["type"]))
                 meta[f"_kit_variants_{idx}_option_type"] = "field_kit_variant_type"
 
             # Push to kit parent product
