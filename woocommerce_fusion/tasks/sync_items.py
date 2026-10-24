@@ -1887,6 +1887,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 # English twin kept references to deleted products. This marker
                 # always differs, forcing the re-map on every kit sync.
                 "kit_variants_sync": frappe.utils.now(),
+                "adv_hide_full_kit": "1" if frappe.db.get_value("Product Bundle", {"new_item_code": item.item.item_code}, "custom_dont_show_full_kit_on_portal") else "0",
             }
             for idx, row in enumerate(valid_rows):
                 meta[f"kit_variants_{idx}_option_position"]  = position_ar.get(row["position"], row["position"])
