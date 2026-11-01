@@ -749,6 +749,8 @@ class SynchroniseItem(SynchroniseWooCommerce):
         clean_name=item.item.custom_woo_name__arabic
         if not clean_name:
             clean_name = self.clean_product_name(raw_name)
+        # Excel imports leave "_x000D_" (an escaped line-break character) in the text; remove it
+        clean_name = re.sub(r"_x000[dD]_", "", clean_name or "").strip()
         # Use the item's Arabic Woo name for ALL products (bundles included) so the
         # data-entry team maintains one field (custom_woo_name__arabic) everywhere.
         if wc_product.woocommerce_name != clean_name[:140]:
@@ -805,6 +807,10 @@ class SynchroniseItem(SynchroniseWooCommerce):
         if description:
             description_text = self.strip_html(description)
         short_description=item.item.custom_woo__short_description
+        # Excel imports leave "_x000D_" (an escaped line-break character) in the text; remove it
+        description_text = re.sub(r"_x000[dD]_", "", description_text or "")
+        if short_description:
+            short_description = re.sub(r"_x000[dD]_", "", short_description)
         self._tracked_push(product_id, "description", description=description_text, short_description=short_description)
         
 
@@ -2427,7 +2433,7 @@ def verify_woo_match(log_name):
     results["Stock Status"] = {"match": wc.get("stock_status") == expected_status}
 
     # Product Name
-    erp_name = (item.custom_woo_name__arabic or item.item_name or "").strip()
+    erp_name = re.sub(r"_x000[dD]_", "", item.custom_woo_name__arabic or item.item_name or "").strip()
     results["Product Name"] = {"match": wc.get("name", "").strip() == erp_name}
 
     # Arabic Name from WC meta
@@ -2556,9 +2562,9 @@ def verify_item_woo_match(item_code):
     results = {}
     wc_price = float(wc.get("regular_price") or 0)
     wc_stock = int(wc.get("stock_quantity") or 0)
-    erp_name = (item.custom_woo_name__arabic or item.item_name or "").strip()
+    erp_name = re.sub(r"_x000[dD]_", "", item.custom_woo_name__arabic or item.item_name or "").strip()
     wc_arabic = wc.get("name", "").strip()
-    erp_arabic = (item.custom_woo_name__arabic or "").strip()
+    erp_arabic = re.sub(r"_x000[dD]_", "", item.custom_woo_name__arabic or "").strip()
     expected_status = "instock" if erp_stock > 0 else "onbackorder"
 
     results["SKU"] = {
