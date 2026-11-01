@@ -445,7 +445,7 @@ def get_data(filters, items, branches):
         woo_offers = "?" if (woo_list and woo_offer_map is None) else ", ".join(
             sorted(offer_terms.get(s, s) for s in woo_offer_slugs))
 
-        note = sync_reason(it, erp_price, sku in server_parents)
+        note = sync_reason(it, erp_price, sku in server_parents, erp_stock, bool(erp_woo_id))
         row = {
             "sku": sku,
             "diff_on": diff_on,
@@ -618,13 +618,16 @@ def build_diff_on(presence, stock_match, price_match, erp_name, woo_name):
     return " + ".join(parts)   # empty string = everything matches
 
 
-def sync_reason(it, erp_price, has_server):
+def sync_reason(it, erp_price, has_server, erp_stock=0, on_website=False):
     """Why the sync would skip this item (mirrors run_item_sync's checks).
     Empty string = nothing blocks it (ready to sync / already synced)."""
     if it.get("disabled"):
         return _("Item disabled")
-    if it.get("custom_disable_sync") or it.get("custom_disable_sync_if_not_in_stock"):
+    if it.get("custom_disable_sync"):
         return _("Sync disabled")
+    # same rule as run_item_sync: skipped only when no stock AND not on the website yet
+    if it.get("custom_disable_sync_if_not_in_stock") and not on_website and float(erp_stock or 0) <= 0:
+        return _("No stock (sync off)")
     if not erp_price or float(erp_price) <= 0:
         return _("No price")
     if not has_server:

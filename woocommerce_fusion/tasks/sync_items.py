@@ -122,11 +122,18 @@ def run_item_sync(
         )
         price = price_doc[0].price_list_rate if price_doc else 0.0
 
-        if item.custom_disable_sync == 1 or item.custom_disable_sync_if_not_in_stock == 1:
-            frappe.log_error(
-                "❌ Skipped Item Sync","sync disabled"
-            )
+        if item.custom_disable_sync == 1:
+            frappe.log_error("❌ Skipped Item Sync", f"Item {item.item_code} not synced — 'Disable sync' is ticked")
             return (None, None)
+
+        # "Disable sync if not in stock": skip only when there is no sellable stock
+        # (kits: worked out from their parts) AND the item is not on the website yet.
+        # Items already on the website still sync, so the website shows them out of stock.
+        if item.custom_disable_sync_if_not_in_stock == 1:
+            on_website = any(str(s.woocommerce_id or "").strip() not in ("", "0") for s in (item.woocommerce_servers or []))
+            if not on_website and get_erp_stock_total(item.item_code) <= 0:
+                frappe.log_error("❌ Skipped Item Sync", f"Item {item.item_code} not synced — no stock and 'Disable sync if not in stock' is ticked")
+                return (None, None)
                    
         if not price or price <= 0:
             frappe.log_error(
@@ -655,7 +662,16 @@ class SynchroniseItem(SynchroniseWooCommerce):
             self.woocommerce_product = wc_product
             wc_product.id=wc_product.woocommerce_id
             item.item_woocommerce_server.woocommerce_id = wc_product.woocommerce_id
-            item.item.save(ignore_permissions=True)
+            # Store the Woo ID on the link row only (same as simple products). Saving the
+            # whole Item can fail on an unrelated field and lose the ID -> duplicate kits.
+            frappe.db.set_value(
+                "Item WooCommerce Server",
+                item.item_woocommerce_server.name,
+                "woocommerce_id",
+                wc_product.woocommerce_id,
+                update_modified=False,
+            )
+            frappe.db.commit()
             try:
                 self.update_woocommerce_product(self.woocommerce_product, item)
             except Exception as e:
