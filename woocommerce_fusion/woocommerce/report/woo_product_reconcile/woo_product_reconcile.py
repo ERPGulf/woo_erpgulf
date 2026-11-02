@@ -119,6 +119,7 @@ def get_columns(branches):
         {"label": _("ERP kit opts"),    "fieldname": "erp_kit_opts","fieldtype": "Data",     "width": 90},
         {"label": _("Woo kit opts"),    "fieldname": "woo_kit_opts","fieldtype": "Data",     "width": 90},
         {"label": _("Kit children"),    "fieldname": "kit_children","fieldtype": "Data",     "width": 140},
+        {"label": _("Kit check"),       "fieldname": "kit_check",   "fieldtype": "Data",     "width": 150},
         {"label": _("ERP packs"),       "fieldname": "erp_packs",   "fieldtype": "Data",     "width": 220},
         {"label": _("Woo packs"),       "fieldname": "woo_packs",   "fieldtype": "Data",     "width": 220},
         {"label": _("Packs"),           "fieldname": "pack_match",  "fieldtype": "Data",     "width": 60},
@@ -322,7 +323,8 @@ def get_data(filters, items, branches):
     else:
         woo_map = fetch_woo_map()
 
-    woo_offer_map, offer_terms = fetch_woo_offer_map()      # Woo product id -> offer slugs
+    woo_offer_map, offer_terms = fetch_woo_offer_map()
+    kit_child_cache = {}      # Woo product id -> offer slugs
 
     scoped = bool(
         filters.get("sku") or filters.get("brand") or filters.get("item_group")
@@ -378,6 +380,15 @@ def get_data(filters, items, branches):
             _kc = kit_children_map.get(sku)
             if _kc and _kc.get("missing"):
                 diff_on = (diff_on + " + " if diff_on else "") + _("Kit child missing")
+
+        # Kit pads + Type: Woo kit must have the same pads as the ERP Product Bundle,
+        # and each pad must carry the Type set on its ERP row (Bundle -> sold only in the kit).
+        kit_check = ""
+        if is_bundle and woo:
+            kit_check, _kit_issues = compare_kit_pads(
+                bundle_children_map.get(sku) or [], woo, woo_map, kit_child_cache)
+            for _issue in _kit_issues:
+                diff_on = (diff_on + " + " if diff_on else "") + _issue
 
         # Pack options: ERP Item Pack Option table vs Woo meta adv_pack_options.
         # The AR product and its EN WPML twin share the SKU; only the AR one holds
@@ -456,6 +467,7 @@ def get_data(filters, items, branches):
             "woo_compat": woo_compat,
             "erp_kit_opts": erp_kit_opts if is_bundle else "",
             "woo_kit_opts": woo_kit_opts if is_bundle else "",
+            "kit_check": kit_check,
             "kit_children": _kit_children_label(kit_children_map.get(sku)) if is_bundle else "",
             "erp_packs": pk_erp if has_packs else "",
             "woo_packs": pk_woo if has_packs else "",
@@ -809,13 +821,13 @@ def get_bundle_children_map(codes):
     child_rows = frappe.get_all(
         "Product Bundle Item",
         filters={"parent": ["in", names]},
-        fields=["parent", "item_code", "qty"],
+        fields=["parent", "item_code", "qty", "custom_type"],
         order_by="parent asc, idx asc",
     )
     by_parent = {}
     for r in child_rows:
         by_parent.setdefault(r["parent"], []).append(
-            {"item_code": r["item_code"], "qty": (r.get("qty") or 1)}
+            {"item_code": r["item_code"], "qty": (r.get("qty") or 1), "type": (r.get("custom_type") or "").strip()}
         )
     return {b["new_item_code"]: by_parent.get(b["name"], []) for b in bundles}
 
@@ -1078,3 +1090,58 @@ def _kit_children_label(st):
     if len(st["missing"]) > 3:
         miss += " +%d" % (len(st["missing"]) - 3)
     return "%d/%d \u2717 %s" % (st["synced"], st["total"], miss)
+
+
+# ---------------------------------------------------------------------
+# Kit pads + Type check (ERP Product Bundle rows vs the live Woo kit)
+# ---------------------------------------------------------------------
+def _woosb_skus(woo):
+    """SKUs listed in a Woo kit's woosb_ids meta ({"k0": {"id", "sku", "qty"}, ...} or a list)."""
+    raw = _woo_meta(woo).get("woosb_ids")
+    if isinstance(raw, str):
+        try:
+            raw = frappe.parse_json(raw)
+        except Exception:
+            raw = None
+    rows = raw.values() if isinstance(raw, dict) else (raw if isinstance(raw, list) else [])
+    return [str(r.get("sku") or "").strip() for r in rows if isinstance(r, dict) and r.get("sku")]
+
+
+def compare_kit_pads(erp_children, woo, woo_map, child_cache):
+    """Woo kit must list the same pads as the ERP Product Bundle, and every pad whose ERP row
+    has a Type (e.g. Bundle) must carry that Type on Woo (meta kit_option_type).
+    Returns (label, [diff names])."""
+    issues, notes = [], []
+    erp_skus = sorted(c["item_code"] for c in erp_children)
+    woo_skus = sorted(_woosb_skus(woo))
+    if woo_skus:
+        if erp_skus != woo_skus:
+            issues.append(_("Kit pads"))
+            notes.append("pads ✗")
+        else:
+            notes.append("pads ✓")
+
+    bad_type = 0
+    typed = 0
+    for c in erp_children:
+        want = (c.get("type") or "").strip()
+        if not want:
+            continue  # blank in this kit; another kit may make the pad Bundle
+        typed += 1
+        sku = c["item_code"]
+        lst = woo_map.get(sku)
+        if not lst:
+            if sku not in child_cache:
+                child_cache[sku] = fetch_woo_one(sku) or []
+            lst = child_cache[sku]
+        if not lst:
+            continue  # pad not on Woo -> already reported as "Kit child missing"
+        have = str(_woo_meta(lst[0]).get("kit_option_type") or "").strip()
+        if have.lower() != want.lower():
+            bad_type += 1
+    if bad_type:
+        issues.append(_("Kit type"))
+        notes.append("type ✗ %d" % bad_type)
+    elif typed:
+        notes.append("type ✓")
+    return " / ".join(notes), issues
