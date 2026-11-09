@@ -1298,6 +1298,26 @@ class SynchroniseItem(SynchroniseWooCommerce):
             name = usable(" ".join(strip_html(desc or "").split()))
         return name or code
 
+    def get_woo_name(self, item_doc):
+        """Website name: Woo Name (Arabic), else Item Name, else the Product Bundle
+        description. A value that is just the item code counts as missing."""
+        code = (item_doc.item_code or "").strip()
+
+        def usable(value):
+            value = re.sub(r"_x000[dD]_", "", value or "").strip()
+            return "" if (not value or value == code) else value
+
+        name = usable(item_doc.custom_woo_name__arabic)
+        if not name:
+            raw = item_doc.item_name or ""
+            # an Arabic item name is kept whole (clean_product_name would keep only its English words)
+            name = usable(raw if self.contains_arabic(raw) else self.clean_product_name(raw))
+        if not name and code:
+            from frappe.utils import strip_html
+            desc = frappe.db.get_value("Product Bundle", {"new_item_code": code}, "description")
+            name = usable(" ".join(strip_html(desc or "").split()))
+        return name or code
+
     def clean_product_name(self, name):
         name = name.strip()
         english_part = self.extract_english(name)
