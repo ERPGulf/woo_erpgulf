@@ -636,7 +636,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
             
             	
             raw_name = item.item.item_name
-            clean_name=item.item.custom_woo_name__arabic
+            clean_name = self.get_woo_name(item.item)
             if not clean_name:
                 clean_name = self.clean_product_name(raw_name)
             # raw_name = item.item.item_name
@@ -746,7 +746,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
         wc_product_dirty = False
         is_bundle = frappe.db.exists("Product Bundle", {"new_item_code": item.item.item_code})		
         raw_name = item.item.item_name
-        clean_name=item.item.custom_woo_name__arabic
+        clean_name = self.get_woo_name(item.item)
         if not clean_name:
             clean_name = self.clean_product_name(raw_name)
         # Excel imports leave "_x000D_" (an escaped line-break character) in the text; remove it
@@ -1280,6 +1280,24 @@ class SynchroniseItem(SynchroniseWooCommerce):
             return ""
 
         return eng_clean
+    def get_woo_name(self, item_doc):
+        """Website name: Woo Name (Arabic), else Item Name, else the Product Bundle
+        description. A value that is just the item code counts as missing."""
+        code = (item_doc.item_code or "").strip()
+
+        def usable(value):
+            value = re.sub(r"_x000[dD]_", "", value or "").strip()
+            return "" if (not value or value == code) else value
+
+        name = usable(item_doc.custom_woo_name__arabic)
+        if not name:
+            name = usable(self.clean_product_name(item_doc.item_name or ""))
+        if not name and code:
+            from frappe.utils import strip_html
+            desc = frappe.db.get_value("Product Bundle", {"new_item_code": code}, "description")
+            name = usable(" ".join(strip_html(desc or "").split()))
+        return name or code
+
     def clean_product_name(self, name):
         name = name.strip()
         english_part = self.extract_english(name)
@@ -1556,7 +1574,7 @@ class SynchroniseItem(SynchroniseWooCommerce):
                 wc_product.attributes = json.dumps(attributes_list)
                 
         raw_name = item.item.item_name
-        clean_name=item.item.custom_woo_name__arabic
+        clean_name = self.get_woo_name(item.item)
         if not clean_name:
             clean_name = self.clean_product_name(raw_name)
         if wc_product.woocommerce_name != clean_name:

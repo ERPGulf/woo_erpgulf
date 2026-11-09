@@ -299,6 +299,9 @@ def get_expected_cat_map(items):
 def get_data(filters, items, branches):
     codes = [i["item_code"] for i in items]
 
+    bundle_desc = {r["new_item_code"]: " ".join(frappe.utils.strip_html(r.get("description") or "").split())
+                   for r in frappe.get_all("Product Bundle", filters={"new_item_code": ["in", codes]},
+                                           fields=["new_item_code", "description"])} if codes else {}
     price_map = get_price_map(codes)
     stock_map = get_stock_map(codes)
     bundle_children_map = get_bundle_children_map(codes)              # KIT bundles
@@ -335,7 +338,13 @@ def get_data(filters, items, branches):
 
     for it in items:
         sku = it["item_code"]
-        erp_name = it.get("custom_woo_name__arabic") or it.get("item_name") or ""
+        erp_name = ""
+        for _n in (it.get("custom_woo_name__arabic"), it.get("item_name"), bundle_desc.get(sku)):
+            _n = (_n or "").strip()
+            if _n and _n != sku:
+                erp_name = _n
+                break
+        erp_name = erp_name or sku
         erp_price = price_map.get(sku)
         is_bundle = sku in bundle_set
         if filters.get("only_bundles") and not is_bundle:
@@ -368,6 +377,8 @@ def get_data(filters, items, branches):
         stock_match = compare_stock(erp_stock, woo_stock_raw)
         price_match = compare_price(erp_price, woo_price)
         diff_on = build_diff_on(presence, stock_match, price_match, erp_name, woo_name)
+        if erp_name == sku:
+            diff_on = (diff_on + " + " if diff_on else "") + _("No name")
 
         erp_compat = compat_map.get(sku, "")
         woo_compat = woo_compat_summary(woo)
